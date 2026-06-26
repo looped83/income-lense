@@ -454,6 +454,22 @@ code {
 .conc-val { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); min-width: 48px; text-align: right; }
 .conc-empty { color: var(--text-faint); font-size: 12px; }
 
+/* ------------------- Calendar & income projection ----------------- */
+.cal-section { margin-top: 26px; }
+.risk-subtitle-note { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+.cal-months { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.cal-row { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 12px; }
+.cal-mlabel { font-size: 12px; color: var(--text-dim); }
+.cal-row.cal-current .cal-mlabel { color: var(--green); font-weight: 700; }
+.cal-barwrap { width: 100%; }
+.cal-fill { display: block; height: 14px; background: var(--green); border-radius: 6px; min-width: 2px; }
+.cal-row.cal-current .cal-fill { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+.cal-val { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 130px; text-align: right; color: var(--text); }
+/* income two-segment bar: green = net, faint orange remainder = tax */
+.inc-track { display: block; height: 14px; background: rgba(243, 156, 18, 0.3); border-radius: 6px; overflow: hidden; min-width: 2px; }
+.inc-net { display: block; height: 100%; background: var(--green); border-radius: 6px; }
+.inc-gross { color: var(--text-faint); }
+
 /* ----------------------------- Table ------------------------------ */
 .table-controls {
   display: flex;
