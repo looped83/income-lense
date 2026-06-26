@@ -708,12 +708,18 @@ function renderActionIdeas() {
 }
 
 /* ----------------------------------------------------------------------------
- * Top-up plan (1.000 € tranches) — greedy planner + rendering
+ * Top-up plan (1.000 € tranches) — target-weight planner + rendering
  * ----------------------------------------------------------------------------
- * Greedy approach: for each tranche, evaluate every position (topUpCandidate),
- * pick the highest-priority eligible one, "invest" 1.000 € into it, then
- * recompute allocations + scores so the NEXT tranche sees the new state. This
- * naturally spreads the budget and avoids over-concentration.
+ * Smarter & more granular than a flat greedy:
+ *   1) Every eligible position gets a quality-scaled TARGET weight (soft cap)
+ *      from its ranking + CSV metrics + diversification (see insights.js).
+ *   2) The budget is split across candidates proportionally to an
+ *      "attractiveness" = quality × how far the position is below its target,
+ *      via iterative water-filling, capped by the soft target and the 8% hard
+ *      cap. Capped positions hand their leftover to the others.
+ *   3) Those € targets are rendered as 1.000 € tranches by repeatedly funding
+ *      whichever position sits furthest below its € target. Allocations + ranks
+ *      are recomputed per tranche so the "Wieso?" stays accurate.
  * --------------------------------------------------------------------------*/
 function buildTopUpPlan(trancheCount) {
   // Work on clones so the real portfolio state is never mutated.
@@ -740,50 +746,93 @@ function buildTopUpPlan(trancheCount) {
   };
 
   let ctx = recompute();
+  const budget = trancheCount * TRANCHE_SIZE;
+
+  // --- 1) Build candidate profiles (quality, soft cap, room) from base state.
+  const candidates = [];
+  sim.forEach((p) => {
+    const m = topUpMetrics(p, ctx);
+    if (!topUpEligible(p, ctx, m)) return;
+    const quality = topUpQuality(p, m);
+    const softCap = topUpSoftCap(quality);
+    // Underweight degree relative to the soft target (0 if already at/above it).
+    const under = Math.max(0, softCap - p.allocation);
+    if (under <= 0) return; // already at its quality target -> nothing to add
+    const attractiveness = quality * Math.min(1, under / softCap);
+    // € room: to the soft target and to the hard cap (whichever is smaller).
+    const roomSoft = Math.max(0, (softCap - p.allocation) * ctx.totalValue);
+    const roomHard = Math.max(0, TOPUP_HARD_CAP * ctx.totalValue - num0(p.value));
+    candidates.push({ p, attractiveness, capEuro: Math.min(roomSoft, roomHard), targetEuro: 0 });
+  });
+  if (!candidates.length) return [];
+
+  // --- 2) Water-filling: split the budget proportionally to attractiveness,
+  //        respecting each candidate's € cap; capped ones spill over.
+  let remaining = budget;
+  for (let iter = 0; iter < 8 && remaining >= 1; iter++) {
+    const open = candidates.filter((c) => c.targetEuro < c.capEuro - 1e-6 && c.attractiveness > 0);
+    const sumAttr = open.reduce((s, c) => s + c.attractiveness, 0);
+    if (sumAttr <= 0) break;
+    let placed = 0;
+    open.forEach((c) => {
+      const want = remaining * (c.attractiveness / sumAttr);
+      const add = Math.min(want, c.capEuro - c.targetEuro);
+      if (add > 0) {
+        c.targetEuro += add;
+        placed += add;
+      }
+    });
+    remaining -= placed;
+    if (placed < 1e-6) break;
+  }
+
+  // --- 3) Render € targets as 1.000 € tranches: each tranche funds the
+  //        position furthest below its € target (granular, proportional spread).
+  const assigned = {};
+  candidates.forEach((c) => (assigned[c.p.symbol] = 0));
+  const bySymbol = {};
+  candidates.forEach((c) => (bySymbol[c.p.symbol] = c));
   const plan = [];
-  const chosenCount = {}; // tranches already assigned per symbol (spreads the budget)
 
   for (let i = 0; i < trancheCount; i++) {
-    // Rank positions by current score so the reasoning can cite the ranking.
+    // Live ranking for the reasoning.
     const ranked = [...sim].sort((a, b) => b.scores.total - a.scores.total);
     const rankOf = {};
     ranked.forEach((p, idx) => (rankOf[p.symbol] = idx + 1));
 
     let best = null;
-    let bestEval = null;
-    sim.forEach((p) => {
-      const ev = topUpCandidate(p, ctx, {
-        timesChosen: chosenCount[p.symbol] || 0,
-        rank: rankOf[p.symbol],
-      });
-      if (!ev.eligible) return;
-      if (!best || ev.priority > bestEval.priority) {
-        best = p;
-        bestEval = ev;
+    let bestGap = 0;
+    candidates.forEach((c) => {
+      if (assigned[c.p.symbol] + TRANCHE_SIZE > c.capEuro + TRANCHE_SIZE * 0.5) return; // respect cap
+      const gap = c.targetEuro - assigned[c.p.symbol];
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = c;
       }
     });
-    if (!best) break; // no eligible candidate left
+    if (!best || bestGap <= 1e-6) break; // all € targets met (budget exceeds sensible capacity)
 
-    chosenCount[best.symbol] = (chosenCount[best.symbol] || 0) + 1;
+    assigned[best.p.symbol] += TRANCHE_SIZE;
+    const m = topUpMetrics(best.p, ctx);
+    const oldAlloc = best.p.allocation;
+    const decisionScore = best.p.scores.total;
+    const reasons = topUpReasons(best.p, m, { rank: rankOf[best.p.symbol] });
 
-    const oldAlloc = best.allocation;
-    const decisionScore = best.scores.total;
-
-    // Invest one tranche, then recompute so later tranches react to it.
-    best.value = num0(best.value) + TRANCHE_SIZE;
+    best.p.value = num0(best.p.value) + TRANCHE_SIZE;
     ctx = recompute();
 
     plan.push({
       n: i + 1,
-      symbol: best.symbol,
-      name: best.name,
-      sector: best.sector,
-      country: best.country,
-      securityType: best.securityType,
+      symbol: best.p.symbol,
+      name: best.p.name,
+      sector: best.p.sector,
+      country: best.p.country,
+      securityType: best.p.securityType,
       score: decisionScore,
-      reasons: bestEval.reasons,
+      reasons,
       oldAlloc,
-      newAlloc: best.allocation,
+      newAlloc: best.p.allocation,
+      targetWeight: topUpSoftCap(topUpQuality(best.p, m)),
     });
   }
   return plan;
@@ -833,7 +882,7 @@ function renderTopUp() {
         </div>
         <div class="topup-name">${escapeHtml(t.name)}</div>
         <div class="topup-meta">${escapeHtml(t.sector)} · ${fmtCountry(t.country)} · ${fmtSecurityType(t.securityType)}</div>
-        <div class="topup-alloc">Anteil: ${fmtPercent(t.oldAlloc, 1)} → <strong>${fmtPercent(t.newAlloc, 1)}</strong></div>
+        <div class="topup-alloc">Anteil: ${fmtPercent(t.oldAlloc, 1)} → <strong>${fmtPercent(t.newAlloc, 1)}</strong> <span class="topup-target-w">(Ziel ~${fmtPercent(t.targetWeight, 1)})</span></div>
         <div class="topup-why">
           <div class="topup-why-title">Wieso?</div>
           <ul>${reasons}</ul>

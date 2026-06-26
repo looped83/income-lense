@@ -214,33 +214,35 @@ function classifyAction(pos, scores, ctx) {
 }
 
 /* ----------------------------------------------------------------------------
- * TOP-UP PLAN — per-candidate evaluation
+ * TOP-UP PLAN — target-weight model
  * ----------------------------------------------------------------------------
- * Given a position and the (simulated) portfolio context, decide whether it is
- * eligible to receive the next 1.000 € tranche, compute a priority value and a
- * list of German reasons explaining WHY. The greedy planner in app.js calls
- * this for every position before each tranche and picks the highest priority.
+ * Smarter & more granular than a flat greedy: every eligible position gets a
+ * quality-scaled TARGET weight (derived from the score ranking + CSV metrics +
+ * diversification). The planner in app.js then distributes the budget
+ * proportionally to each position's quality AND how far it sits below its
+ * target ("water-filling"), capped by concentration limits. Result: the budget
+ * spreads finely across many individual values instead of hammering one name.
  *
- * Rule-based and transparent — no black box. The reasons drive the "Wieso?".
+ * Everything stays transparent (no black box) — the reasons drive the "Wieso?".
  * TRANCHE_SIZE must match the planner in app.js.
  * --------------------------------------------------------------------------*/
 const TRANCHE_SIZE = 1000;
 
 /**
- * Weighting of the top-up priority. The recommendation is driven dynamically by
- *   - the score RANKING (pos.scores.total, itself the SCORE_WEIGHTS blend),
- *   - CSV-derived metrics (allocation, sector/country, CAGR, yield),
- *   - and diversification of the individual portfolio.
- * All weights are easy to adjust here.
+ * Weighting that turns a position's ranking + CSV metrics into a 0..1 quality.
+ * Higher quality -> higher target weight -> more of the budget. Easy to tune.
  */
 const TOPUP_WEIGHTS = {
-  ranking: 1.0, // overall score (the ranking)
-  headroom: 0.6, // allocation room to grow
+  ranking: 1.0, // overall score (the ranking; itself the SCORE_WEIGHTS blend)
   diversification: 0.5, // underweight sector / country
   growth: 0.4, // dividend growth (CAGR)
   income: 0.4, // yield attractiveness
-  repeatPenalty: 20, // per tranche already given to this value -> spreads the budget
 };
+
+// Quality-scaled target weight band + hard single-position cap.
+const TOPUP_SOFT_MIN = 0.02; // a borderline candidate (quality ~0) targets ~2%
+const TOPUP_SOFT_MAX = 0.06; // a top candidate (quality ~1) targets ~6%
+const TOPUP_HARD_CAP = 0.08; // never push a single position beyond 8%
 
 /** Clamp a value into 0..100. */
 function clamp100(n) {
@@ -248,13 +250,11 @@ function clamp100(n) {
 }
 
 /**
- * Evaluate a position as a candidate for the next 1.000 € tranche.
- * Returns { eligible, priority, reasons }. opts: { timesChosen, rank }.
+ * Compute the transparent 0..100 sub-metrics for a position from the CSV +
+ * current (simulated) context. Shared by eligibility, quality and reasons so
+ * everything stays consistent.
  */
-function topUpCandidate(pos, ctx, opts = {}) {
-  const timesChosen = opts.timesChosen || 0;
-  const rank = opts.rank;
-  const s = pos.scores;
+function topUpMetrics(pos, ctx) {
   const alloc = pos.allocation || 0;
   const dy = pos.dividendYield;
   const cagr = pos.dividendCagr;
@@ -265,22 +265,11 @@ function topUpCandidate(pos, ctx, opts = {}) {
   const incomeShare =
     ctx.totalAnnualDividend > 0 ? num0(pos.totalDividendRate) / ctx.totalAnnualDividend : 0;
 
-  // --- Hard eligibility gates (a tranche must not create obvious problems) ---
-  if (s.total < 55) return { eligible: false }; // too weak overall
-  const projAlloc = (num0(pos.value) + TRANCHE_SIZE) / (ctx.totalValue + TRANCHE_SIZE);
-  if (projAlloc > 0.08) return { eligible: false }; // would breach 8% single-position cap
-  if (hasNum(dy) && dy > 0.08 && !(hasNum(cagr) && cagr >= 0.05)) return { eligible: false }; // yield trap
-  if (sectorShare > 0.25 && !genericSector) return { eligible: false }; // sector too heavy
-  if (hasNum(cagr) && cagr < 0) return { eligible: false }; // shrinking dividend
-
-  // --- Transparent 0..100 sub-metrics derived from the CSV ---
-  // Allocation headroom: ~0% allocation -> 100, 6%+ -> 0.
-  const headroom = clamp100(100 - (alloc / 0.06) * 100);
   // Diversification: underweight sector & country score higher.
   const sectorComp = genericSector ? 60 : clamp100(100 - (sectorShare / 0.25) * 100);
   const countryComp = clamp100(100 - (countryShare / 0.7) * 100);
   const diversification = (sectorComp + countryComp) / 2;
-  // Dividend growth: 12%+ CAGR -> 100 (ETFs/funds get a neutral default if n/a).
+  // Dividend growth: 12%+ CAGR -> 100 (funds/ETFs get a neutral default if n/a).
   const growthScore = hasNum(cagr) ? clamp100((cagr / 0.12) * 100) : isFund ? 50 : 40;
   // Yield attractiveness: sweet spot 2–6% is best.
   let incomeScore;
@@ -290,41 +279,61 @@ function topUpCandidate(pos, ctx, opts = {}) {
   else if (dy < 0.01) incomeScore = 30;
   else incomeScore = 20;
 
-  // --- Weighted priority (the "Gewichtung") ---
+  return {
+    alloc, dy, cagr, sectorShare, countryShare, isFund, genericSector,
+    incomeShare, diversification, growthScore, incomeScore,
+  };
+}
+
+/** Hard gates: may this position receive a tranche at all? */
+function topUpEligible(pos, ctx, m) {
+  const s = pos.scores;
+  if (s.total < 55) return false; // too weak overall
+  const projAlloc = (num0(pos.value) + TRANCHE_SIZE) / (ctx.totalValue + TRANCHE_SIZE);
+  if (projAlloc > TOPUP_HARD_CAP) return false; // would breach single-position cap
+  if (hasNum(m.dy) && m.dy > 0.08 && !(hasNum(m.cagr) && m.cagr >= 0.05)) return false; // yield trap
+  if (m.sectorShare > 0.25 && !m.genericSector) return false; // sector too heavy
+  if (hasNum(m.cagr) && m.cagr < 0) return false; // shrinking dividend
+  if (m.incomeShare > 0.1) return false; // already dominates portfolio income
+  return true;
+}
+
+/** Quality 0..1: weighted blend of ranking + diversification + growth + income. */
+function topUpQuality(pos, m) {
   const W = TOPUP_WEIGHTS;
-  let priority =
-    W.ranking * s.total +
-    W.headroom * headroom +
-    W.diversification * diversification +
-    W.growth * growthScore +
-    W.income * incomeScore -
-    W.repeatPenalty * timesChosen;
+  const wsum = W.ranking + W.diversification + W.growth + W.income;
+  const q =
+    (W.ranking * (pos.scores.total / 100) +
+      W.diversification * (m.diversification / 100) +
+      W.growth * (m.growthScore / 100) +
+      W.income * (m.incomeScore / 100)) /
+    wsum;
+  return Math.max(0, Math.min(1, q));
+}
 
-  // Guard against one payer dominating total income.
-  if (incomeShare > 0.08) priority -= 30;
+/** Quality-scaled target weight (soft cap) for a position. */
+function topUpSoftCap(quality) {
+  return TOPUP_SOFT_MIN + (TOPUP_SOFT_MAX - TOPUP_SOFT_MIN) * quality;
+}
 
-  // --- Reasons (the "Wieso?"), derived from the same components ---
+/** German reasons ("Wieso?") for a chosen tranche; opts: { rank, targetWeight }. */
+function topUpReasons(pos, m, opts = {}) {
+  const s = pos.scores;
   const reasons = [];
   reasons.push(
-    rank ? `hoher Gesamt-Score (${s.total}) – Rang ${rank} im Depot` : `guter Gesamt-Score (${s.total})`
+    opts.rank ? `hoher Gesamt-Score (${s.total}) – Rang ${opts.rank} im Depot` : `guter Gesamt-Score (${s.total})`
   );
-  if (alloc < 0.02) reasons.push(`geringer Depotanteil (${fmtPercent(alloc, 1)}) – viel Spielraum`);
-  else if (alloc < 0.04) reasons.push(`moderater Depotanteil (${fmtPercent(alloc, 1)})`);
-  else if (alloc >= 0.05) reasons.push(`Anteil bereits erhöht (${fmtPercent(alloc, 1)})`);
-  if (!genericSector && sectorShare < 0.10)
-    reasons.push(`untergewichteter Sektor ${pos.sector} (${fmtPercent(sectorShare, 1)})`);
-  else if (!genericSector && sectorShare > 0.20)
-    reasons.push(`Sektor ${pos.sector} bereits hoch gewichtet (${fmtPercent(sectorShare, 1)})`);
-  if (hasNum(cagr) && cagr >= 0.10)
-    reasons.push(`starkes Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
-  else if (hasNum(cagr) && cagr >= 0.05)
-    reasons.push(`solides Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
-  if (hasNum(dy) && dy >= 0.02 && dy <= 0.06)
-    reasons.push(`attraktive Dividendenrendite (${fmtPercent(dy)})`);
-  else if (hasNum(dy) && dy > 0.06 && dy <= 0.08)
-    reasons.push(`hohe Dividendenrendite (${fmtPercent(dy)})`);
-  if (incomeShare > 0.08) reasons.push('trägt bereits viel zum Gesamteinkommen bei');
-  if (isFund) reasons.push(`breit streuender ${fmtSecurityType(pos.securityType)} verbessert die Diversifikation`);
-
-  return { eligible: true, priority, reasons: reasons.slice(0, 5) };
+  if (m.alloc < 0.02) reasons.push(`geringer Depotanteil (${fmtPercent(m.alloc, 1)}) – deutlich unter Zielgewicht`);
+  else if (m.alloc < 0.04) reasons.push(`moderater Depotanteil (${fmtPercent(m.alloc, 1)})`);
+  else reasons.push(`Depotanteil ${fmtPercent(m.alloc, 1)} – nähert sich dem Zielgewicht`);
+  if (!m.genericSector && m.sectorShare < 0.1)
+    reasons.push(`untergewichteter Sektor ${pos.sector} (${fmtPercent(m.sectorShare, 1)})`);
+  else if (!m.genericSector && m.sectorShare > 0.2)
+    reasons.push(`Sektor ${pos.sector} bereits hoch gewichtet (${fmtPercent(m.sectorShare, 1)})`);
+  if (hasNum(m.cagr) && m.cagr >= 0.1) reasons.push(`starkes Dividendenwachstum (CAGR ${fmtPercent(m.cagr, 1)})`);
+  else if (hasNum(m.cagr) && m.cagr >= 0.05) reasons.push(`solides Dividendenwachstum (CAGR ${fmtPercent(m.cagr, 1)})`);
+  if (hasNum(m.dy) && m.dy >= 0.02 && m.dy <= 0.06) reasons.push(`attraktive Dividendenrendite (${fmtPercent(m.dy)})`);
+  else if (hasNum(m.dy) && m.dy > 0.06 && m.dy <= 0.08) reasons.push(`hohe Dividendenrendite (${fmtPercent(m.dy)})`);
+  if (m.isFund) reasons.push(`breit streuender ${fmtSecurityType(pos.securityType)} verbessert die Diversifikation`);
+  return reasons.slice(0, 5);
 }
