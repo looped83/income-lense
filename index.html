@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -32,6 +32,7 @@
       <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
       <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
       <button type="button" class="nav-item" data-view="view-actions">Action Ideas</button>
+      <button type="button" class="nav-item" data-view="view-topup">Aufstock-Plan</button>
       <button type="button" class="nav-item" data-view="view-table">Positionen</button>
       <button type="button" class="nav-item" data-view="view-details">Detailanalyse</button>
       <button type="button" class="nav-item hidden" id="navInactive" data-view="view-inactive">Inaktiv / Watchlist</button>
@@ -116,6 +117,25 @@
           Entscheidung wären zusätzliche Fundamentaldaten nötig.
         </p>
         <div id="actionIdeas" class="action-grid"></div>
+      </section>
+
+      <!-- TOP-UP PLAN (1.000 € tranches) -->
+      <section class="block view" id="view-topup">
+        <h2 class="block-title">Aufstock-Plan in 1.000-€-Tranchen</h2>
+        <p class="block-note">
+          Vorschlag, welche Werte du auf Basis der Analyse als Nächstes aufstocken könntest –
+          aufgeteilt in Tranchen von je 1.000 €. Nach jeder Tranche wird die Allokation neu
+          berechnet, damit sich die Empfehlungen automatisch streuen. <strong>Keine Anlageberatung.</strong>
+        </p>
+        <div class="topup-controls">
+          <label class="topup-field">
+            <span>Geplantes Budget (€)</span>
+            <input type="number" id="topupBudget" class="ctrl" min="1000" step="1000" value="10000" />
+          </label>
+          <div class="topup-summary" id="topupSummary"></div>
+        </div>
+        <div id="topupPlan" class="topup-plan"></div>
+        <div id="topupAgg" class="topup-agg"></div>
       </section>
 
       <!-- POSITION TABLE -->
@@ -218,9 +238,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=4"></script>
-  <script src="scoring.js?v=4"></script>
-  <script src="insights.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="formatting.js?v=5"></script>
+  <script src="scoring.js?v=5"></script>
+  <script src="insights.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
