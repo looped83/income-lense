@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -31,6 +31,7 @@
     <div class="main-nav-inner">
       <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
       <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
+      <button type="button" class="nav-item" data-view="view-risk">Risiko &amp; Konzentration</button>
       <button type="button" class="nav-item" data-view="view-actions">Action Ideas</button>
       <button type="button" class="nav-item" data-view="view-topup">Aufstock-Plan</button>
       <button type="button" class="nav-item" data-view="view-table">Positionen</button>
@@ -105,6 +106,38 @@
           <div class="chart-card">
             <h3>Dividendenbeitrag nach Sektor</h3>
             <div class="chart-wrap"><canvas id="chartDivSector"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RISK & CONCENTRATION -->
+      <section class="block view" id="view-risk">
+        <h2 class="block-title">Risiko &amp; Konzentration</h2>
+        <p class="block-note">
+          Konzentrations- und Klumpenrisiken deines Depots auf Basis der CSV. „Gemischt" steht für
+          breit streuende ETFs/Fonds und wird nicht als Einzelrisiko gewertet. <strong>Keine Anlageberatung.</strong>
+        </p>
+        <div id="riskKpis" class="kpi-grid"></div>
+
+        <h3 class="risk-subtitle">Risiko-Hinweise</h3>
+        <div id="riskFlags" class="risk-flags"></div>
+
+        <div class="risk-detail-grid">
+          <div class="risk-block">
+            <h3>Top-Positionen nach Gewicht</h3>
+            <div id="riskTopPositions" class="conc-list"></div>
+          </div>
+          <div class="risk-block">
+            <h3>Einkommens-Konzentration (Dividendenzahler)</h3>
+            <div id="riskIncome" class="conc-list"></div>
+          </div>
+          <div class="risk-block">
+            <h3>Sektor-Allokation</h3>
+            <div id="riskSectors" class="conc-list"></div>
+          </div>
+          <div class="risk-block">
+            <h3>Länder-Allokation</h3>
+            <div id="riskCountries" class="conc-list"></div>
           </div>
         </div>
       </section>
@@ -240,9 +273,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=7"></script>
-  <script src="scoring.js?v=7"></script>
-  <script src="insights.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="formatting.js?v=8"></script>
+  <script src="scoring.js?v=8"></script>
+  <script src="insights.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
