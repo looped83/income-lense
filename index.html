@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=11" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -33,6 +33,7 @@
   <nav id="mainNav" class="main-nav hidden" aria-label="Bereichsnavigation">
     <div class="main-nav-inner">
       <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
+      <button type="button" class="nav-item" data-view="view-recommendations">Handlungsempfehlungen</button>
       <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
       <button type="button" class="nav-item" data-view="view-risk">Risiko &amp; Konzentration</button>
       <button type="button" class="nav-item" data-view="view-calendar">Dividendenkalender</button>
@@ -78,6 +79,17 @@
       <section class="block view active" id="view-overview">
         <h2 class="block-title">Portfolio-Übersicht</h2>
         <div id="kpiGrid" class="kpi-grid"></div>
+      </section>
+
+      <!-- RECOMMENDATIONS -->
+      <section class="block view" id="view-recommendations">
+        <h2 class="block-title">Handlungsempfehlungen</h2>
+        <p class="block-note">
+          Individuelle, priorisierte Empfehlungen für dein Depot – abgeleitet aus Scores,
+          Konzentration, Wachstum und Einkommen. Wortwahl bewusst abwägend; <strong>keine Anlageberatung.</strong>
+        </p>
+        <div id="recSummary" class="topup-summary"></div>
+        <div id="recList" class="rec-list"></div>
       </section>
 
       <!-- CHARTS -->
@@ -338,9 +350,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=10"></script>
-  <script src="scoring.js?v=10"></script>
-  <script src="insights.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="formatting.js?v=11"></script>
+  <script src="scoring.js?v=11"></script>
+  <script src="insights.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

@@ -169,6 +169,7 @@ function handleParsedData(rows) {
   populateFilters();
   renderKpis();
   renderCharts();
+  renderRecommendations();
   renderRisk();
   renderCalendar();
   renderIncome();
@@ -707,6 +708,136 @@ function renderActionIdeas() {
         <div class="ai-chips">${chips}</div>
       </div>`;
     })
+    .join('');
+}
+
+/* ----------------------------------------------------------------------------
+ * Handlungsempfehlungen (individual, prioritised recommendations)
+ * ----------------------------------------------------------------------------
+ * Synthesises the whole analysis (scores, allocation, concentration, growth,
+ * income, top-up quality) into concrete, individual recommendations for THIS
+ * portfolio. Rule-based and non-advisory ("prüfen", "könnte sinnvoll sein").
+ * Each rec: { sev:'high'|'mid'|'low', cat, title, text }.
+ * --------------------------------------------------------------------------*/
+function buildRecommendations() {
+  const ctx = STATE.ctx;
+  const active = STATE.active;
+  const totalDiv = ctx.totalAnnualDividend;
+  const recs = [];
+
+  // --- Portfolio: country concentration ---
+  Object.entries(ctx.countryAllocation)
+    .filter(([k]) => !isGeneric(k))
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([k, v]) => {
+      if (v > 0.6)
+        recs.push({ sev: 'high', cat: 'Diversifizieren', title: `Länderklumpen ${fmtCountry(k)} (${fmtPercent(v, 1)})`, text: `Über die Hälfte des Depots entfällt auf ${fmtCountry(k)}. Eine breitere internationale Streuung (z. B. Europa, Emerging Markets) könnte das Klumpenrisiko senken; weitere ${fmtCountry(k)}-Käufe eher zurückstellen.` });
+      else if (v > 0.45)
+        recs.push({ sev: 'mid', cat: 'Diversifizieren', title: `Hohe ${fmtCountry(k)}-Gewichtung (${fmtPercent(v, 1)})`, text: `${fmtCountry(k)} ist überdurchschnittlich gewichtet. Bei Neukäufen stärker auf andere Regionen achten könnte sinnvoll sein.` });
+    });
+
+  // --- Portfolio: sector concentration ---
+  Object.entries(ctx.sectorAllocation)
+    .filter(([k]) => !isGeneric(k))
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([k, v]) => {
+      if (v > 0.25)
+        recs.push({ sev: 'high', cat: 'Diversifizieren', title: `Sektor ${k} stark gewichtet (${fmtPercent(v, 1)})`, text: `Der Sektor ${k} macht ${fmtPercent(v, 1)} des Depots aus. Weitere Käufe in diesem Sektor erhöhen das Konzentrationsrisiko; ergänzende Sektoren prüfen.` });
+      else if (v > 0.2)
+        recs.push({ sev: 'mid', cat: 'Diversifizieren', title: `Sektor ${k} beobachten (${fmtPercent(v, 1)})`, text: `${k} nähert sich einer hohen Gewichtung (${fmtPercent(v, 1)}). Weitere Aufstockungen hier eher zurückhaltend.` });
+    });
+
+  // --- Portfolio: income concentration ---
+  active
+    .map((p) => ({ p, s: totalDiv > 0 ? num0(p.totalDividendRate) / totalDiv : 0 }))
+    .filter((x) => x.s > 0.08)
+    .sort((a, b) => b.s - a.s)
+    .forEach(({ p, s }) => {
+      recs.push({ sev: s > 0.1 ? 'high' : 'mid', cat: 'Einkommen', title: `Einkommensklumpen: ${p.symbol} (${fmtPercent(s, 1)} der Dividenden)`, text: `${p.symbol} liefert ${fmtPercent(s, 1)} deiner gesamten Dividenden. Eine Kürzung träfe dein Einkommen spürbar – weitere Aufstockung erhöht die Abhängigkeit.` });
+    });
+
+  // --- Position-level ---
+  active.forEach((p) => {
+    const s = p.scores;
+    const alloc = p.allocation || 0;
+    const dy = p.dividendYield;
+    const cagr = p.dividendCagr;
+    const gainRel = p.gainRel;
+
+    if (alloc > 0.08)
+      recs.push({ sev: 'high', cat: 'Reduzieren', title: `${p.symbol} übergewichtet (${fmtPercent(alloc, 1)})`, text: `${p.symbol} (${p.name}) liegt über 8 % Depotanteil. Eine Teilreduzierung – mindestens aber ein Aufstockungsstopp – könnte das Klumpenrisiko begrenzen.` });
+    else if (alloc > 0.05 && (s.total < 55 || (hasNum(cagr) && cagr < 0)))
+      recs.push({ sev: 'mid', cat: 'Reduzieren', title: `${p.symbol} groß bei schwachen Signalen (${fmtPercent(alloc, 1)})`, text: `${p.symbol} ist überdurchschnittlich groß und zeigt schwächere Kennzahlen (Score ${s.total}${hasNum(cagr) && cagr < 0 ? `, negativer Dividenden-CAGR ${fmtPercent(cagr, 1)}` : ''}). Reduzierung prüfen und nicht weiter aufstocken.` });
+
+    if (s.total < 40)
+      recs.push({ sev: 'high', cat: 'Risiko', title: `${p.symbol}: kritischer Score (${s.total})`, text: `${p.symbol} erreicht nur einen Score von ${s.total}. Position kritisch prüfen – nicht aufstocken; ggf. Trennung erwägen.` });
+
+    if (hasNum(dy) && dy > 0.08) {
+      if (hasNum(cagr) && cagr < 0)
+        recs.push({ sev: 'high', cat: 'Risiko', title: `${p.symbol}: mögliche Renditefalle (${fmtPercent(dy)})`, text: `Sehr hohe Rendite (${fmtPercent(dy)}) bei negativem Dividendenwachstum (${fmtPercent(cagr, 1)}). Dividendensicherheit kritisch prüfen, bevor aufgestockt wird.` });
+      else
+        recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: hohe Rendite prüfen (${fmtPercent(dy)})`, text: `Auffällig hohe Rendite (${fmtPercent(dy)}). Nachhaltigkeit der Dividende beobachten; nur mit Bedacht aufstocken.` });
+    } else if (hasNum(cagr) && cagr < 0 && alloc <= 0.05) {
+      recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: rückläufige Dividende`, text: `Negativer Dividenden-CAGR (${fmtPercent(cagr, 1)}). Investmentthese und Dividendensicherheit prüfen.` });
+    }
+
+    if (hasNum(gainRel) && gainRel <= -0.15 && num0(p.totalDividendRate) > 0)
+      recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: deutlicher Buchverlust (${fmtSignedPercent(gainRel)})`, text: `Trotz laufender Dividende ein klarer Kursverlust. Prüfen, ob die ursprüngliche Investmentthese noch trägt.` });
+  });
+
+  // --- Opportunities: strong, underweight add candidates (from top-up model) ---
+  const addCands = [];
+  active.forEach((p) => {
+    const m = topUpMetrics(p, ctx);
+    if (!topUpEligible(p, ctx, m)) return;
+    const q = topUpQuality(p, m);
+    const softCap = topUpSoftCap(q);
+    if ((p.allocation || 0) < softCap * 0.6) addCands.push({ p, q, m });
+  });
+  addCands
+    .sort((a, b) => b.q - a.q)
+    .slice(0, 4)
+    .forEach(({ p, m }) => {
+      const sectorHint = !m.genericSector && m.sectorShare < 0.1 ? `, untergewichteter Sektor ${p.sector}` : '';
+      recs.push({ sev: 'low', cat: 'Aufstocken', title: `${p.symbol}: Aufstockung könnte sinnvoll sein`, text: `Starker, noch untergewichteter Wert (Score ${p.scores.total}, Anteil ${fmtPercent(p.allocation, 1)}${sectorHint}). Ein schrittweiser Ausbau könnte das Profil verbessern – Details im Aufstock-Plan.` });
+    });
+
+  // Dedupe by title, then sort by severity (high -> mid -> low).
+  const seen = new Set();
+  const order = { high: 0, mid: 1, low: 2 };
+  return recs
+    .filter((r) => (seen.has(r.title) ? false : (seen.add(r.title), true)))
+    .sort((a, b) => order[a.sev] - order[b.sev]);
+}
+
+function renderRecommendations() {
+  if (!STATE.active.length) return;
+  const recs = buildRecommendations();
+  const sumEl = document.getElementById('recSummary');
+  const listEl = document.getElementById('recList');
+
+  if (!recs.length) {
+    sumEl.innerHTML = '';
+    listEl.innerHTML = '<div class="risk-ok">Aktuell keine dringenden Handlungsempfehlungen aus den CSV-Kennzahlen erkennbar.</div>';
+    return;
+  }
+
+  const count = (sev) => recs.filter((r) => r.sev === sev).length;
+  sumEl.innerHTML = `<span><strong>${recs.length}</strong> Empfehlungen</span><span>${count('high')} hoch</span><span>${count('mid')} mittel</span><span>${count('low')} Chancen</span>`;
+
+  const sevLabel = { high: 'Hoch', mid: 'Mittel', low: 'Chance' };
+  listEl.innerHTML = recs
+    .map(
+      (r) => `
+      <div class="rec-card rec-${r.sev}">
+        <div class="rec-head">
+          <span class="risk-badge rec-badge-${r.sev}">${sevLabel[r.sev]}</span>
+          <span class="rec-cat">${r.cat}</span>
+          <span class="rec-title">${escapeHtml(r.title)}</span>
+        </div>
+        <div class="rec-text">${escapeHtml(r.text)}</div>
+      </div>`
+    )
     .join('');
 }
 
