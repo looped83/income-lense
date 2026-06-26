@@ -467,10 +467,12 @@ code {
 .rec-card.rec-high { border-left-color: var(--red); }
 .rec-card.rec-mid { border-left-color: var(--orange); }
 .rec-card.rec-low { border-left-color: var(--green); }
+.rec-card.rec-info { border-left-color: var(--blue); }
 .rec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .rec-badge-high { background: var(--red-soft); color: var(--red); }
 .rec-badge-mid { background: rgba(243, 156, 18, 0.16); color: var(--orange); }
 .rec-badge-low { background: var(--green-soft); color: var(--green); }
+.rec-badge-info { background: rgba(52, 152, 219, 0.16); color: var(--blue); }
 .rec-cat {
   font-size: 11px;
   font-weight: 600;

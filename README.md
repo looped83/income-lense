@@ -24,7 +24,7 @@ Alle Werte werden **aus der hochgeladenen CSV berechnet** – nichts ist hartkod
 
 ### Navigation
 
-Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Handlungsempfehlungen**, **Charts & Allokation**, **Risiko & Konzentration**, **Dividendenkalender**, **Einkommens-Prognose**, **Action Ideas**, **Aufstock-Plan**, **Positionen**, **Detailanalyse**, **Inaktiv / Watchlist** (nur falls vorhanden) und **Info & Grenzen**. Es ist immer nur ein Bereich sichtbar.
+Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Handlungsempfehlungen**, **Allokation**, **Risiko**, **Einkommensprognose**, **Dividendenkalender**, **Aufstockplan**, **Einordnung**, **Positionen**, **Detailanalyse** und **Inaktiv** (nur falls vorhanden). Es ist immer nur ein Bereich sichtbar.
 
 ---
 
