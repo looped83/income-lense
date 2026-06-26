@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -14,12 +14,15 @@
     <div class="header-inner">
       <div class="header-text">
         <h1>Income Lense</h1>
-        <p class="subtitle">CSV-basierte Depotanalyse für Dividenden, Wachstum, Risiko und Allokation</p>
       </div>
       <div class="header-actions">
-        <label class="upload-btn">
+        <label class="upload-btn" title="DivvyDiary-CSV laden" aria-label="DivvyDiary-CSV laden">
           <input type="file" id="csvFile" accept=".csv,text/csv" hidden />
-          <span>📁 DivvyDiary-CSV laden</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
         </label>
       </div>
     </div>
@@ -335,9 +338,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=9"></script>
-  <script src="scoring.js?v=9"></script>
-  <script src="insights.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="formatting.js?v=10"></script>
+  <script src="scoring.js?v=10"></script>
+  <script src="insights.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

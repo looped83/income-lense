@@ -84,11 +84,11 @@ code {
 .upload-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   background: var(--green);
   color: #06231a;
-  font-weight: 700;
-  padding: 11px 18px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -96,6 +96,7 @@ code {
   box-shadow: 0 4px 14px rgba(46, 204, 113, 0.25);
 }
 .upload-btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.upload-btn svg { width: 20px; height: 20px; }
 
 /* --------------------------- Navigation --------------------------- */
 .main-nav {
@@ -718,5 +719,4 @@ code {
   .detail-list { position: static; max-height: 260px; }
   .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .kpi-value { font-size: 18px; }
-  .upload-btn { width: 100%; justify-content: center; }
 }
