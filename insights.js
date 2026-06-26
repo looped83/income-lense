@@ -226,7 +226,34 @@ function classifyAction(pos, scores, ctx) {
  * --------------------------------------------------------------------------*/
 const TRANCHE_SIZE = 1000;
 
-function topUpCandidate(pos, ctx) {
+/**
+ * Weighting of the top-up priority. The recommendation is driven dynamically by
+ *   - the score RANKING (pos.scores.total, itself the SCORE_WEIGHTS blend),
+ *   - CSV-derived metrics (allocation, sector/country, CAGR, yield),
+ *   - and diversification of the individual portfolio.
+ * All weights are easy to adjust here.
+ */
+const TOPUP_WEIGHTS = {
+  ranking: 1.0, // overall score (the ranking)
+  headroom: 0.6, // allocation room to grow
+  diversification: 0.5, // underweight sector / country
+  growth: 0.4, // dividend growth (CAGR)
+  income: 0.4, // yield attractiveness
+  repeatPenalty: 20, // per tranche already given to this value -> spreads the budget
+};
+
+/** Clamp a value into 0..100. */
+function clamp100(n) {
+  return Math.max(0, Math.min(100, n));
+}
+
+/**
+ * Evaluate a position as a candidate for the next 1.000 € tranche.
+ * Returns { eligible, priority, reasons }. opts: { timesChosen, rank }.
+ */
+function topUpCandidate(pos, ctx, opts = {}) {
+  const timesChosen = opts.timesChosen || 0;
+  const rank = opts.rank;
   const s = pos.scores;
   const alloc = pos.allocation || 0;
   const dy = pos.dividendYield;
@@ -235,85 +262,69 @@ function topUpCandidate(pos, ctx) {
   const countryShare = ctx.countryAllocation[pos.country] || 0;
   const isFund = (pos.securityType || '').toUpperCase() !== 'EQUITY';
   const genericSector = pos.sector === 'mixed' || pos.sector === 'Unbekannt';
-
-  // --- Hard eligibility gates (a tranche must not create obvious problems) ---
-  // Too weak overall -> not an add candidate.
-  if (s.total < 55) return { eligible: false };
-  // Would push the single-position weight past the 8% hard cap.
-  const projAlloc = (num0(pos.value) + TRANCHE_SIZE) / (ctx.totalValue + TRANCHE_SIZE);
-  if (projAlloc > 0.08) return { eligible: false };
-  // Yield trap: very high yield without convincing dividend growth.
-  if (hasNum(dy) && dy > 0.08 && !(hasNum(cagr) && cagr >= 0.05)) return { eligible: false };
-  // Sector already very heavy (skip generic "mixed" ETF bucket).
-  if (sectorShare > 0.25 && !genericSector) return { eligible: false };
-  // Shrinking dividend is a quality red flag -> don't add.
-  if (hasNum(cagr) && cagr < 0) return { eligible: false };
-
-  // --- Priority build (higher = better candidate for the next tranche) ---
-  const reasons = [];
-  let priority = s.total; // quality is the backbone of the priority
-  reasons.push(`guter Gesamt-Score (${s.total})`);
-
-  // Allocation headroom: reward room to grow, penalise already-large weights.
-  if (alloc < 0.02) {
-    priority += 25;
-    reasons.push(`geringer Depotanteil (${fmtPercent(alloc, 1)}) – viel Spielraum nach oben`);
-  } else if (alloc < 0.04) {
-    priority += 12;
-    reasons.push(`moderater Depotanteil (${fmtPercent(alloc, 1)})`);
-  } else if (alloc < 0.05) {
-    priority += 3;
-  } else {
-    priority -= 12;
-    reasons.push(`Anteil bereits erhöht (${fmtPercent(alloc, 1)}) – nur begrenzt aufstocken`);
-  }
-
-  // Sector diversification: reward underweight sectors, penalise heavy ones.
-  if (!genericSector && sectorShare < 0.10) {
-    priority += 10;
-    reasons.push(`untergewichteter Sektor ${pos.sector} (${fmtPercent(sectorShare, 1)})`);
-  } else if (sectorShare > 0.20 && !genericSector) {
-    priority -= 8;
-    reasons.push(`Sektor ${pos.sector} bereits stark gewichtet (${fmtPercent(sectorShare, 1)})`);
-  }
-
-  // Country concentration guard.
-  if (countryShare > 0.60) {
-    priority -= 8;
-    reasons.push(`Land ${fmtCountry(pos.country)} bereits hoch gewichtet (${fmtPercent(countryShare, 1)})`);
-  }
-
-  // Dividend growth.
-  if (hasNum(cagr) && cagr >= 0.10) {
-    priority += 10;
-    reasons.push(`starkes Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
-  } else if (hasNum(cagr) && cagr >= 0.05) {
-    priority += 6;
-    reasons.push(`solides Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
-  }
-
-  // Yield attractiveness (sweet spot vs. merely high).
-  if (hasNum(dy) && dy >= 0.02 && dy <= 0.06) {
-    priority += 8;
-    reasons.push(`attraktive Dividendenrendite (${fmtPercent(dy)})`);
-  } else if (hasNum(dy) && dy > 0.06 && dy <= 0.08) {
-    priority += 3;
-    reasons.push(`hohe Dividendenrendite (${fmtPercent(dy)})`);
-  }
-
-  // Income concentration: don't let one payer dominate total income.
   const incomeShare =
     ctx.totalAnnualDividend > 0 ? num0(pos.totalDividendRate) / ctx.totalAnnualDividend : 0;
-  if (incomeShare > 0.08) {
-    priority -= 6;
-    reasons.push('trägt bereits viel zum Gesamteinkommen bei');
-  }
 
-  // Diversifying funds/ETFs get a small bonus.
-  if (isFund) {
-    priority += 5;
-    reasons.push(`breit streuender ${fmtSecurityType(pos.securityType)} verbessert die Diversifikation`);
-  }
+  // --- Hard eligibility gates (a tranche must not create obvious problems) ---
+  if (s.total < 55) return { eligible: false }; // too weak overall
+  const projAlloc = (num0(pos.value) + TRANCHE_SIZE) / (ctx.totalValue + TRANCHE_SIZE);
+  if (projAlloc > 0.08) return { eligible: false }; // would breach 8% single-position cap
+  if (hasNum(dy) && dy > 0.08 && !(hasNum(cagr) && cagr >= 0.05)) return { eligible: false }; // yield trap
+  if (sectorShare > 0.25 && !genericSector) return { eligible: false }; // sector too heavy
+  if (hasNum(cagr) && cagr < 0) return { eligible: false }; // shrinking dividend
+
+  // --- Transparent 0..100 sub-metrics derived from the CSV ---
+  // Allocation headroom: ~0% allocation -> 100, 6%+ -> 0.
+  const headroom = clamp100(100 - (alloc / 0.06) * 100);
+  // Diversification: underweight sector & country score higher.
+  const sectorComp = genericSector ? 60 : clamp100(100 - (sectorShare / 0.25) * 100);
+  const countryComp = clamp100(100 - (countryShare / 0.7) * 100);
+  const diversification = (sectorComp + countryComp) / 2;
+  // Dividend growth: 12%+ CAGR -> 100 (ETFs/funds get a neutral default if n/a).
+  const growthScore = hasNum(cagr) ? clamp100((cagr / 0.12) * 100) : isFund ? 50 : 40;
+  // Yield attractiveness: sweet spot 2–6% is best.
+  let incomeScore;
+  if (!hasNum(dy)) incomeScore = 40;
+  else if (dy >= 0.02 && dy <= 0.06) incomeScore = 100;
+  else if ((dy >= 0.01 && dy < 0.02) || (dy > 0.06 && dy <= 0.08)) incomeScore = 60;
+  else if (dy < 0.01) incomeScore = 30;
+  else incomeScore = 20;
+
+  // --- Weighted priority (the "Gewichtung") ---
+  const W = TOPUP_WEIGHTS;
+  let priority =
+    W.ranking * s.total +
+    W.headroom * headroom +
+    W.diversification * diversification +
+    W.growth * growthScore +
+    W.income * incomeScore -
+    W.repeatPenalty * timesChosen;
+
+  // Guard against one payer dominating total income.
+  if (incomeShare > 0.08) priority -= 30;
+
+  // --- Reasons (the "Wieso?"), derived from the same components ---
+  const reasons = [];
+  reasons.push(
+    rank ? `hoher Gesamt-Score (${s.total}) – Rang ${rank} im Depot` : `guter Gesamt-Score (${s.total})`
+  );
+  if (alloc < 0.02) reasons.push(`geringer Depotanteil (${fmtPercent(alloc, 1)}) – viel Spielraum`);
+  else if (alloc < 0.04) reasons.push(`moderater Depotanteil (${fmtPercent(alloc, 1)})`);
+  else if (alloc >= 0.05) reasons.push(`Anteil bereits erhöht (${fmtPercent(alloc, 1)})`);
+  if (!genericSector && sectorShare < 0.10)
+    reasons.push(`untergewichteter Sektor ${pos.sector} (${fmtPercent(sectorShare, 1)})`);
+  else if (!genericSector && sectorShare > 0.20)
+    reasons.push(`Sektor ${pos.sector} bereits hoch gewichtet (${fmtPercent(sectorShare, 1)})`);
+  if (hasNum(cagr) && cagr >= 0.10)
+    reasons.push(`starkes Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
+  else if (hasNum(cagr) && cagr >= 0.05)
+    reasons.push(`solides Dividendenwachstum (CAGR ${fmtPercent(cagr, 1)})`);
+  if (hasNum(dy) && dy >= 0.02 && dy <= 0.06)
+    reasons.push(`attraktive Dividendenrendite (${fmtPercent(dy)})`);
+  else if (hasNum(dy) && dy > 0.06 && dy <= 0.08)
+    reasons.push(`hohe Dividendenrendite (${fmtPercent(dy)})`);
+  if (incomeShare > 0.08) reasons.push('trägt bereits viel zum Gesamteinkommen bei');
+  if (isFund) reasons.push(`breit streuender ${fmtSecurityType(pos.securityType)} verbessert die Diversifikation`);
 
   return { eligible: true, priority, reasons: reasons.slice(0, 5) };
 }

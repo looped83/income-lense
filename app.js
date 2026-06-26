@@ -741,12 +741,21 @@ function buildTopUpPlan(trancheCount) {
 
   let ctx = recompute();
   const plan = [];
+  const chosenCount = {}; // tranches already assigned per symbol (spreads the budget)
 
   for (let i = 0; i < trancheCount; i++) {
+    // Rank positions by current score so the reasoning can cite the ranking.
+    const ranked = [...sim].sort((a, b) => b.scores.total - a.scores.total);
+    const rankOf = {};
+    ranked.forEach((p, idx) => (rankOf[p.symbol] = idx + 1));
+
     let best = null;
     let bestEval = null;
     sim.forEach((p) => {
-      const ev = topUpCandidate(p, ctx);
+      const ev = topUpCandidate(p, ctx, {
+        timesChosen: chosenCount[p.symbol] || 0,
+        rank: rankOf[p.symbol],
+      });
       if (!ev.eligible) return;
       if (!best || ev.priority > bestEval.priority) {
         best = p;
@@ -754,6 +763,8 @@ function buildTopUpPlan(trancheCount) {
       }
     });
     if (!best) break; // no eligible candidate left
+
+    chosenCount[best.symbol] = (chosenCount[best.symbol] || 0) + 1;
 
     const oldAlloc = best.allocation;
     const decisionScore = best.scores.total;
