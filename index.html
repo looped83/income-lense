@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -124,10 +124,10 @@
         <h2 class="block-title">Aufstock-Plan in 1.000-€-Tranchen</h2>
         <p class="block-note">
           Vorschlag, welche Werte du auf Basis der Analyse als Nächstes aufstocken könntest –
-          aufgeteilt in Tranchen von je 1.000 €. Die Empfehlung leitet sich dynamisch aus deiner
-          CSV, dem Score-Ranking und der Gewichtung der Kennzahlen ab; nach jeder Tranche wird die
-          Allokation neu berechnet, damit sich die Vorschläge automatisch streuen.
-          <strong>Keine Anlageberatung.</strong>
+          aufgeteilt in Tranchen von je 1.000 €. Aus deiner CSV, dem Score-Ranking und der
+          Gewichtung der Kennzahlen wird je Wert ein qualitätsabhängiges <strong>Zielgewicht</strong>
+          abgeleitet; das Budget wird dann proportional zu Qualität und Untergewichtung über mehrere
+          Werte verteilt. <strong>Keine Anlageberatung.</strong>
         </p>
         <div class="topup-controls">
           <label class="topup-field">
@@ -240,9 +240,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=6"></script>
-  <script src="scoring.js?v=6"></script>
-  <script src="insights.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="formatting.js?v=7"></script>
+  <script src="scoring.js?v=7"></script>
+  <script src="insights.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
