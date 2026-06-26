@@ -389,6 +389,71 @@ code {
 .topup-agg-amount { color: var(--green); font-weight: 700; font-size: 13px; white-space: nowrap; }
 .topup-agg-count { color: var(--text-faint); font-weight: 500; font-size: 11px; }
 
+/* ------------------------ Risk & concentration -------------------- */
+.risk-subtitle { font-size: 15px; font-weight: 700; margin: 26px 0 12px; }
+.risk-flags { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.risk-flag {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.risk-flag.risk-high { border-left-color: var(--red); }
+.risk-flag.risk-mid { border-left-color: var(--orange); }
+.risk-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.risk-high .risk-badge { background: var(--red-soft); color: var(--red); }
+.risk-mid .risk-badge { background: rgba(243, 156, 18, 0.16); color: var(--orange); }
+.risk-ok {
+  background: var(--green-soft);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  color: #8fe6b3;
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.risk-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+  margin-top: 26px;
+}
+.risk-block {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.risk-block h3 { margin: 0 0 14px; font-size: 14px; font-weight: 600; }
+.conc-list { display: flex; flex-direction: column; gap: 8px; }
+.conc-row { display: grid; grid-template-columns: 1fr 120px auto; align-items: center; gap: 10px; }
+.conc-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conc-track { background: rgba(255, 255, 255, 0.06); border-radius: 6px; height: 8px; overflow: hidden; }
+.conc-fill { display: block; height: 100%; border-radius: 6px; background: var(--blue); }
+.conc-fill.conc-high { background: var(--red); }
+.conc-fill.conc-mid { background: var(--orange); }
+.conc-val { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); min-width: 48px; text-align: right; }
+.conc-empty { color: var(--text-faint); font-size: 12px; }
+
 /* ----------------------------- Table ------------------------------ */
 .table-controls {
   display: flex;

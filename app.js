@@ -169,6 +169,7 @@ function handleParsedData(rows) {
   populateFilters();
   renderKpis();
   renderCharts();
+  renderRisk();
   renderTable();
   renderDetailCards();
   renderActionIdeas();
@@ -705,6 +706,200 @@ function renderActionIdeas() {
       </div>`;
     })
     .join('');
+}
+
+/* ----------------------------------------------------------------------------
+ * Risk & concentration
+ * ----------------------------------------------------------------------------
+ * Transparent concentration analytics derived from the CSV: HHI / effective
+ * number of holdings, top-N share, single-position / sector / country / income
+ * concentration, yield-trap flags and an overall diversification score.
+ * "mixed" / "Unbekannt" buckets are broad ETFs/funds and are treated as
+ * diversified (not flagged as a single-name risk).
+ * --------------------------------------------------------------------------*/
+const GENERIC_BUCKETS = ['mixed', 'Unbekannt', ''];
+
+function isGeneric(key) {
+  return GENERIC_BUCKETS.includes(key);
+}
+
+/** Herfindahl-Hirschman Index (sum of squared shares) for a list of fractions. */
+function hhi(shares) {
+  return shares.reduce((s, w) => s + w * w, 0);
+}
+
+/** Effective number of items = 1 / HHI (1 = fully concentrated). */
+function effectiveCount(shares) {
+  const h = hhi(shares);
+  return h > 0 ? 1 / h : 0;
+}
+
+function computeRisk() {
+  const active = STATE.active;
+  const ctx = STATE.ctx;
+  const totalValue = ctx.totalValue;
+  const totalDiv = ctx.totalAnnualDividend;
+
+  // Position weights (desc).
+  const positions = active
+    .map((p) => ({ p, w: totalValue > 0 ? num0(p.value) / totalValue : 0 }))
+    .sort((a, b) => b.w - a.w);
+  const posShares = positions.map((x) => x.w);
+  const effN = effectiveCount(posShares);
+  const top5 = posShares.slice(0, 5).reduce((s, w) => s + w, 0);
+  const top10 = posShares.slice(0, 10).reduce((s, w) => s + w, 0);
+  const largest = positions[0] || null;
+
+  // Sector / country shares (entries desc).
+  const sectorEntries = Object.entries(ctx.sectorAllocation).sort((a, b) => b[1] - a[1]);
+  const countryEntries = Object.entries(ctx.countryAllocation).sort((a, b) => b[1] - a[1]);
+  const namedSector = sectorEntries.filter(([k]) => !isGeneric(k));
+  const namedCountry = countryEntries.filter(([k]) => !isGeneric(k));
+  const largestSector = namedSector[0] || null;
+  const largestCountry = namedCountry[0] || null;
+
+  // Income concentration (dividend payers).
+  const payers = active
+    .map((p) => ({ p, s: totalDiv > 0 ? num0(p.totalDividendRate) / totalDiv : 0 }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+  const incomeShares = payers.map((x) => x.s);
+  const effNIncome = effectiveCount(incomeShares);
+  const topPayer = payers[0] || null;
+
+  // --- Diversification score (0..100, transparent) ---
+  const posDiv = clamp100((effN / 30) * 100); // 30+ effective holdings -> 100
+  const sectorDiv = clamp100(100 - (Math.max(0, (largestSector ? largestSector[1] : 0) - 0.1) / 0.25) * 100); // 10%->100, 35%->0
+  const countryDiv = clamp100(100 - (Math.max(0, (largestCountry ? largestCountry[1] : 0) - 0.3) / 0.4) * 100); // 30%->100, 70%->0
+  const incomeDiv = clamp100((effNIncome / 25) * 100);
+  const diversification = Math.round(0.35 * posDiv + 0.25 * sectorDiv + 0.2 * countryDiv + 0.2 * incomeDiv);
+
+  // --- Warnings ---
+  const flags = [];
+  positions.forEach(({ p, w }) => {
+    if (w > 0.08) flags.push({ sev: 'high', text: `Klumpenrisiko: ${p.symbol} macht ${fmtPercent(w, 1)} des Depots aus (> 8 %).` });
+    else if (w > 0.05) flags.push({ sev: 'mid', text: `${p.symbol} ist mit ${fmtPercent(w, 1)} überdurchschnittlich groß (> 5 %).` });
+  });
+  namedSector.forEach(([k, v]) => {
+    if (v > 0.3) flags.push({ sev: 'high', text: `Sektor ${k} ist mit ${fmtPercent(v, 1)} sehr hoch gewichtet (> 30 %).` });
+    else if (v > 0.2) flags.push({ sev: 'mid', text: `Sektor ${k} ist mit ${fmtPercent(v, 1)} hoch gewichtet (> 20 %).` });
+  });
+  namedCountry.forEach(([k, v]) => {
+    if (v > 0.6) flags.push({ sev: 'high', text: `Land ${fmtCountry(k)} ist mit ${fmtPercent(v, 1)} sehr hoch gewichtet (> 60 %).` });
+    else if (v > 0.45) flags.push({ sev: 'mid', text: `Land ${fmtCountry(k)} ist mit ${fmtPercent(v, 1)} hoch gewichtet (> 45 %).` });
+  });
+  payers.forEach(({ p, s }) => {
+    if (s > 0.1) flags.push({ sev: 'high', text: `${p.symbol} liefert ${fmtPercent(s, 1)} der gesamten Dividenden – hohe Einkommenskonzentration.` });
+    else if (s > 0.06) flags.push({ sev: 'mid', text: `${p.symbol} liefert ${fmtPercent(s, 1)} der gesamten Dividenden.` });
+  });
+  active.forEach((p) => {
+    const dy = p.dividendYield;
+    const cagr = p.dividendCagr;
+    if (hasNum(dy) && dy > 0.08) {
+      if (hasNum(cagr) && cagr < 0)
+        flags.push({ sev: 'high', text: `${p.symbol}: sehr hohe Rendite (${fmtPercent(dy)}) bei negativem Dividendenwachstum – mögliche Renditefalle.` });
+      else if (!hasNum(cagr) || cagr < 0.05)
+        flags.push({ sev: 'mid', text: `${p.symbol}: sehr hohe Rendite (${fmtPercent(dy)}) bei schwachem Wachstum – kritisch beobachten.` });
+    }
+  });
+  if (effN < 12)
+    flags.push({ sev: 'mid', text: `Geringe effektive Streuung: nur ${fmtNumber(effN, 1)} effektive Positionen trotz ${active.length} Werten.` });
+
+  // High severity first.
+  flags.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === 'high' ? -1 : 1));
+
+  return {
+    positions, effN, top5, top10, largest,
+    sectorEntries, countryEntries, largestSector, largestCountry,
+    payers, effNIncome, topPayer,
+    diversification, flags,
+  };
+}
+
+/** Render a list of concentration bars. items: [{label, value, sev, sub}]. */
+function concBars(items) {
+  if (!items.length) return '<div class="conc-empty">Keine Daten</div>';
+  const max = Math.max(...items.map((i) => i.value), 0.0001);
+  return items
+    .map(
+      (i) => `
+      <div class="conc-row">
+        <span class="conc-label" title="${escapeHtml(i.label)}">${escapeHtml(i.label)}</span>
+        <span class="conc-track"><span class="conc-fill ${i.sev ? 'conc-' + i.sev : ''}" style="width:${((i.value / max) * 100).toFixed(1)}%"></span></span>
+        <span class="conc-val">${fmtPercent(i.value, 1)}</span>
+      </div>`
+    )
+    .join('');
+}
+
+function renderRisk() {
+  if (!STATE.active.length) return;
+  const r = computeRisk();
+
+  // KPI cards.
+  const dColor = scoreColor(r.diversification);
+  const cards = [
+    { label: 'Diversifikations-Score', value: `<span style="color:${dColor}">${r.diversification}</span>`, sub: '0–100 · höher = breiter gestreut' },
+    { label: 'Effektive Positionen', value: fmtNumber(r.effN, 1), sub: `von ${r.positions.length} aktiven` },
+    { label: 'Größte Position', value: r.largest ? r.largest.p.symbol : 'n/a', sub: r.largest ? fmtPercent(r.largest.w, 1) : '' },
+    { label: 'Top-10-Anteil', value: fmtPercent(r.top10, 1), sub: `Top 5: ${fmtPercent(r.top5, 1)}` },
+    { label: 'Größter Sektor', value: r.largestSector ? r.largestSector[0] : 'n/a', sub: r.largestSector ? fmtPercent(r.largestSector[1], 1) : '' },
+    { label: 'Größtes Land', value: r.largestCountry ? fmtCountry(r.largestCountry[0]) : 'n/a', sub: r.largestCountry ? fmtPercent(r.largestCountry[1], 1) : '' },
+    { label: 'Größter Dividendenzahler', value: r.topPayer ? r.topPayer.p.symbol : 'n/a', sub: r.topPayer ? `${fmtPercent(r.topPayer.s, 1)} des Einkommens` : '' },
+    { label: 'Risiko-Hinweise', value: fmtNumber(r.flags.length, 0), sub: `${r.flags.filter((f) => f.sev === 'high').length} hoch` },
+  ];
+  document.getElementById('riskKpis').innerHTML = cards
+    .map(
+      (c) => `
+      <div class="kpi-card">
+        <div class="kpi-label">${c.label}</div>
+        <div class="kpi-value">${c.value}</div>
+        ${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}
+      </div>`
+    )
+    .join('');
+
+  // Flags.
+  const flagsEl = document.getElementById('riskFlags');
+  if (!r.flags.length) {
+    flagsEl.innerHTML = '<div class="risk-ok">Keine kritischen Klumpenrisiken in den CSV-Kennzahlen erkennbar.</div>';
+  } else {
+    flagsEl.innerHTML = r.flags
+      .map(
+        (f) => `<div class="risk-flag risk-${f.sev}"><span class="risk-badge">${f.sev === 'high' ? 'Hoch' : 'Mittel'}</span><span>${escapeHtml(f.text)}</span></div>`
+      )
+      .join('');
+  }
+
+  // Detail bars.
+  document.getElementById('riskTopPositions').innerHTML = concBars(
+    r.positions.slice(0, 10).map(({ p, w }) => ({
+      label: `${p.symbol} · ${p.name}`,
+      value: w,
+      sev: w > 0.08 ? 'high' : w > 0.05 ? 'mid' : null,
+    }))
+  );
+  document.getElementById('riskIncome').innerHTML = concBars(
+    r.payers.slice(0, 10).map(({ p, s }) => ({
+      label: `${p.symbol} · ${p.name}`,
+      value: s,
+      sev: s > 0.1 ? 'high' : s > 0.06 ? 'mid' : null,
+    }))
+  );
+  document.getElementById('riskSectors').innerHTML = concBars(
+    r.sectorEntries.map(([k, v]) => ({
+      label: isGeneric(k) ? `${k === 'mixed' ? 'Gemischt (ETFs)' : 'Unbekannt'}` : k,
+      value: v,
+      sev: isGeneric(k) ? null : v > 0.3 ? 'high' : v > 0.2 ? 'mid' : null,
+    }))
+  );
+  document.getElementById('riskCountries').innerHTML = concBars(
+    r.countryEntries.map(([k, v]) => ({
+      label: isGeneric(k) ? (k === 'mixed' ? 'Gemischt (ETFs)' : 'Unbekannt') : fmtCountry(k),
+      value: v,
+      sev: isGeneric(k) ? null : v > 0.6 ? 'high' : v > 0.45 ? 'mid' : null,
+    }))
+  );
 }
 
 /* ----------------------------------------------------------------------------
