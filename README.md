@@ -13,13 +13,14 @@ Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://d
 - **Positionsübersicht:** sortier- und filterbare Tabelle (Suche, Sektor, Land, Aktionskategorie; Sortierung nach Wert, Dividende, Anteil, Rendite, CAGR, Score).
 - **Detaillierte Positionskarten:** je aktiver Position ein großer Score-Kreis (0–100), fünf Teil-Scores (Sicherheit, Einkommen, Wachstum, Depot-Fit, Konzentrationsrisiko), alle relevanten Kennzahlen und 3–6 automatische Insights.
 - **Action Ideas:** Gruppierung in Aufstockungskandidaten, Halten, Beobachten, Nicht weiter aufstocken, Reduzierung prüfen, Inaktiv/Watchlist.
+- **Aufstock-Plan (1.000-€-Tranchen):** Für ein eingegebenes Budget wird ein greedy Plan erstellt, welche Werte du als Nächstes aufstocken könntest. Nach jeder Tranche wird die Allokation neu berechnet, sodass sich die Empfehlungen automatisch streuen. Jede Tranche enthält eine nachvollziehbare Begründung („Wieso?").
 - **Inaktiv-Bereich:** Positionen mit Marktwert = 0 werden aus den aktiven Berechnungen ausgeschlossen und separat gelistet.
 
 Alle Werte werden **aus der hochgeladenen CSV berechnet** – nichts ist hartkodiert.
 
 ### Navigation
 
-Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Charts & Allokation**, **Action Ideas**, **Positionen**, **Detailanalyse**, **Inaktiv / Watchlist** (nur falls vorhanden) und **Info & Grenzen**. Es ist immer nur ein Bereich sichtbar.
+Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Charts & Allokation**, **Action Ideas**, **Aufstock-Plan**, **Positionen**, **Detailanalyse**, **Inaktiv / Watchlist** (nur falls vorhanden) und **Info & Grenzen**. Es ist immer nur ein Bereich sichtbar.
 
 ---
 

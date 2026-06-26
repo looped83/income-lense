@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) el.addEventListener('input', renderTable);
   });
 
+  // Top-up plan recomputes when the budget changes.
+  const budget = document.getElementById('topupBudget');
+  if (budget) budget.addEventListener('input', renderTopUp);
+
   setupNav();
 });
 
@@ -168,6 +172,7 @@ function handleParsedData(rows) {
   renderTable();
   renderDetailCards();
   renderActionIdeas();
+  renderTopUp();
   renderInactive();
 
   // Always start on the overview "page".
@@ -700,6 +705,153 @@ function renderActionIdeas() {
       </div>`;
     })
     .join('');
+}
+
+/* ----------------------------------------------------------------------------
+ * Top-up plan (1.000 € tranches) — greedy planner + rendering
+ * ----------------------------------------------------------------------------
+ * Greedy approach: for each tranche, evaluate every position (topUpCandidate),
+ * pick the highest-priority eligible one, "invest" 1.000 € into it, then
+ * recompute allocations + scores so the NEXT tranche sees the new state. This
+ * naturally spreads the budget and avoids over-concentration.
+ * --------------------------------------------------------------------------*/
+function buildTopUpPlan(trancheCount) {
+  // Work on clones so the real portfolio state is never mutated.
+  const sim = STATE.active.map((p) => ({ ...p }));
+
+  // Recompute allocations, context and scores from the simulated values.
+  const recompute = () => {
+    const totalValue = sim.reduce((s, p) => s + num0(p.value), 0);
+    const totalAnnualDividend = sim.reduce((s, p) => s + num0(p.totalDividendRate), 0);
+    const sectorValue = {};
+    const countryValue = {};
+    sim.forEach((p) => {
+      sectorValue[p.sector] = (sectorValue[p.sector] || 0) + num0(p.value);
+      countryValue[p.country] = (countryValue[p.country] || 0) + num0(p.value);
+    });
+    const sectorAllocation = {};
+    const countryAllocation = {};
+    Object.keys(sectorValue).forEach((k) => (sectorAllocation[k] = totalValue > 0 ? sectorValue[k] / totalValue : 0));
+    Object.keys(countryValue).forEach((k) => (countryAllocation[k] = totalValue > 0 ? countryValue[k] / totalValue : 0));
+    sim.forEach((p) => (p.allocation = totalValue > 0 ? num0(p.value) / totalValue : 0));
+    const ctx = { totalValue, totalAnnualDividend, sectorAllocation, countryAllocation };
+    sim.forEach((p) => (p.scores = computeScores(p, ctx)));
+    return ctx;
+  };
+
+  let ctx = recompute();
+  const plan = [];
+
+  for (let i = 0; i < trancheCount; i++) {
+    let best = null;
+    let bestEval = null;
+    sim.forEach((p) => {
+      const ev = topUpCandidate(p, ctx);
+      if (!ev.eligible) return;
+      if (!best || ev.priority > bestEval.priority) {
+        best = p;
+        bestEval = ev;
+      }
+    });
+    if (!best) break; // no eligible candidate left
+
+    const oldAlloc = best.allocation;
+    const decisionScore = best.scores.total;
+
+    // Invest one tranche, then recompute so later tranches react to it.
+    best.value = num0(best.value) + TRANCHE_SIZE;
+    ctx = recompute();
+
+    plan.push({
+      n: i + 1,
+      symbol: best.symbol,
+      name: best.name,
+      sector: best.sector,
+      country: best.country,
+      securityType: best.securityType,
+      score: decisionScore,
+      reasons: bestEval.reasons,
+      oldAlloc,
+      newAlloc: best.allocation,
+    });
+  }
+  return plan;
+}
+
+function renderTopUp() {
+  if (!STATE.active.length) return;
+  const input = document.getElementById('topupBudget');
+  let budget = parseInt(input.value, 10);
+  if (!Number.isFinite(budget) || budget < TRANCHE_SIZE) budget = TRANCHE_SIZE;
+  const trancheCount = Math.floor(budget / TRANCHE_SIZE);
+
+  const plan = buildTopUpPlan(trancheCount);
+
+  const summary = document.getElementById('topupSummary');
+  const planEl = document.getElementById('topupPlan');
+  const aggEl = document.getElementById('topupAgg');
+
+  if (!plan.length) {
+    summary.innerHTML = '';
+    planEl.innerHTML =
+      '<div class="info-box">Auf Basis der aktuellen Analyse gibt es derzeit keine eindeutigen Aufstockungskandidaten ' +
+      '(z. B. wegen hoher Konzentration oder schwacher Signale). Für eine genauere Entscheidung wären zusätzliche Fundamentaldaten nötig.</div>';
+    aggEl.innerHTML = '';
+    return;
+  }
+
+  const invested = plan.length * TRANCHE_SIZE;
+  summary.innerHTML = `
+    <span><strong>${plan.length}</strong> Tranchen</span>
+    <span><strong>${fmtCurrency(invested)}</strong> verplant</span>`;
+
+  // Per-tranche cards with the reasoning ("Wieso?").
+  planEl.innerHTML = plan
+    .map((t) => {
+      const interp = interpretScore(t.score);
+      const reasons = t.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('');
+      return `
+      <div class="topup-card">
+        <div class="topup-head">
+          <span class="topup-n">Tranche ${t.n}</span>
+          <span class="topup-amount">${fmtCurrency(TRANCHE_SIZE)}</span>
+        </div>
+        <div class="topup-target">
+          <span class="topup-sym">${escapeHtml(t.symbol)}</span>
+          <span class="score-pill ${interp.cls}">${t.score}</span>
+        </div>
+        <div class="topup-name">${escapeHtml(t.name)}</div>
+        <div class="topup-meta">${escapeHtml(t.sector)} · ${fmtCountry(t.country)} · ${fmtSecurityType(t.securityType)}</div>
+        <div class="topup-alloc">Anteil: ${fmtPercent(t.oldAlloc, 1)} → <strong>${fmtPercent(t.newAlloc, 1)}</strong></div>
+        <div class="topup-why">
+          <div class="topup-why-title">Wieso?</div>
+          <ul>${reasons}</ul>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  // Aggregate the budget per position (how much total goes where).
+  const agg = {};
+  plan.forEach((t) => {
+    if (!agg[t.symbol]) agg[t.symbol] = { symbol: t.symbol, name: t.name, count: 0 };
+    agg[t.symbol].count += 1;
+  });
+  const aggList = Object.values(agg).sort((a, b) => b.count - a.count);
+  aggEl.innerHTML = `
+    <h3 class="topup-agg-title">Zusammenfassung pro Wert</h3>
+    <div class="topup-agg-grid">
+      ${aggList
+        .map(
+          (a) => `
+        <div class="topup-agg-item">
+          <span class="topup-agg-sym">${escapeHtml(a.symbol)}</span>
+          <span class="topup-agg-name">${escapeHtml(a.name)}</span>
+          <span class="topup-agg-amount">${fmtCurrency(a.count * TRANCHE_SIZE)} <span class="topup-agg-count">(${a.count}×)</span></span>
+        </div>`
+        )
+        .join('')}
+    </div>`;
 }
 
 /* ----------------------------------------------------------------------------
