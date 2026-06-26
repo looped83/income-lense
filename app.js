@@ -763,13 +763,17 @@ function buildRecommendations() {
     const dy = p.dividendYield;
     const cagr = p.dividendCagr;
     const gainRel = p.gainRel;
+    // Dividendless assets (crypto, accumulating ETFs) are out of scope for the
+    // dividend-focused score -> handled as a separate info hint below, not as a
+    // "critical score" risk.
+    const nonDividend = num0(p.totalDividendRate) <= 0;
 
     if (alloc > 0.08)
       recs.push({ sev: 'high', cat: 'Reduzieren', title: `${p.symbol} übergewichtet (${fmtPercent(alloc, 1)})`, text: `${p.symbol} (${p.name}) liegt über 8 % Depotanteil. Eine Teilreduzierung – mindestens aber ein Aufstockungsstopp – könnte das Klumpenrisiko begrenzen.` });
     else if (alloc > 0.05 && (s.total < 55 || (hasNum(cagr) && cagr < 0)))
       recs.push({ sev: 'mid', cat: 'Reduzieren', title: `${p.symbol} groß bei schwachen Signalen (${fmtPercent(alloc, 1)})`, text: `${p.symbol} ist überdurchschnittlich groß und zeigt schwächere Kennzahlen (Score ${s.total}${hasNum(cagr) && cagr < 0 ? `, negativer Dividenden-CAGR ${fmtPercent(cagr, 1)}` : ''}). Reduzierung prüfen und nicht weiter aufstocken.` });
 
-    if (s.total < 40)
+    if (s.total < 40 && !nonDividend)
       recs.push({ sev: 'high', cat: 'Risiko', title: `${p.symbol}: kritischer Score (${s.total})`, text: `${p.symbol} erreicht nur einen Score von ${s.total}. Position kritisch prüfen – nicht aufstocken; ggf. Trennung erwägen.` });
 
     if (hasNum(dy) && dy > 0.08) {
@@ -802,9 +806,15 @@ function buildRecommendations() {
       recs.push({ sev: 'low', cat: 'Aufstocken', title: `${p.symbol}: Aufstockung könnte sinnvoll sein`, text: `Starker, noch untergewichteter Wert (Score ${p.scores.total}, Anteil ${fmtPercent(p.allocation, 1)}${sectorHint}). Ein schrittweiser Ausbau könnte das Profil verbessern – Details im Aufstock-Plan.` });
     });
 
-  // Dedupe by title, then sort by severity (high -> mid -> low).
+  // Dividendless assets (crypto, accumulating ETFs): one informational hint
+  // instead of flagging each as a "critical score".
+  const nonDivSyms = active.filter((p) => num0(p.totalDividendRate) <= 0).map((p) => p.symbol);
+  if (nonDivSyms.length)
+    recs.push({ sev: 'info', cat: 'Hinweis', title: `Werte ohne Dividende (${nonDivSyms.length})`, text: `${nonDivSyms.join(', ')} schütten keine Dividende aus (z. B. Krypto oder thesaurierende ETFs). Der dividendenbasierte Score ist für diese Werte nur eingeschränkt aussagekräftig – sie nach eigener Strategie (z. B. Wachstum oder Beimischung) bewerten.` });
+
+  // Dedupe by title, then sort by severity (high -> mid -> low -> info).
   const seen = new Set();
-  const order = { high: 0, mid: 1, low: 2 };
+  const order = { high: 0, mid: 1, low: 2, info: 3 };
   return recs
     .filter((r) => (seen.has(r.title) ? false : (seen.add(r.title), true)))
     .sort((a, b) => order[a.sev] - order[b.sev]);
@@ -823,9 +833,15 @@ function renderRecommendations() {
   }
 
   const count = (sev) => recs.filter((r) => r.sev === sev).length;
-  sumEl.innerHTML = `<span><strong>${recs.length}</strong> Empfehlungen</span><span>${count('high')} hoch</span><span>${count('mid')} mittel</span><span>${count('low')} Chancen</span>`;
+  const parts = [
+    ['high', 'hoch'], ['mid', 'mittel'], ['low', 'Chancen'], ['info', 'Hinweise'],
+  ]
+    .filter(([sev]) => count(sev) > 0)
+    .map(([sev, label]) => `<span>${count(sev)} ${label}</span>`)
+    .join('');
+  sumEl.innerHTML = `<span><strong>${recs.length}</strong> Empfehlungen</span>${parts}`;
 
-  const sevLabel = { high: 'Hoch', mid: 'Mittel', low: 'Chance' };
+  const sevLabel = { high: 'Hoch', mid: 'Mittel', low: 'Chance', info: 'Hinweis' };
   listEl.innerHTML = recs
     .map(
       (r) => `

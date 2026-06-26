@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -34,16 +34,15 @@
     <div class="main-nav-inner">
       <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
       <button type="button" class="nav-item" data-view="view-recommendations">Handlungsempfehlungen</button>
-      <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
-      <button type="button" class="nav-item" data-view="view-risk">Risiko &amp; Konzentration</button>
+      <button type="button" class="nav-item" data-view="view-charts">Allokation</button>
+      <button type="button" class="nav-item" data-view="view-risk">Risiko</button>
+      <button type="button" class="nav-item" data-view="view-income">Einkommensprognose</button>
       <button type="button" class="nav-item" data-view="view-calendar">Dividendenkalender</button>
-      <button type="button" class="nav-item" data-view="view-income">Einkommens-Prognose</button>
-      <button type="button" class="nav-item" data-view="view-actions">Action Ideas</button>
-      <button type="button" class="nav-item" data-view="view-topup">Aufstock-Plan</button>
+      <button type="button" class="nav-item" data-view="view-topup">Aufstockplan</button>
+      <button type="button" class="nav-item" data-view="view-actions">Einordnung</button>
       <button type="button" class="nav-item" data-view="view-table">Positionen</button>
       <button type="button" class="nav-item" data-view="view-details">Detailanalyse</button>
-      <button type="button" class="nav-item hidden" id="navInactive" data-view="view-inactive">Inaktiv / Watchlist</button>
-      <button type="button" class="nav-item" data-view="view-info">Info &amp; Grenzen</button>
+      <button type="button" class="nav-item hidden" id="navInactive" data-view="view-inactive">Inaktiv</button>
     </div>
   </nav>
 
@@ -94,7 +93,7 @@
 
       <!-- CHARTS -->
       <section class="block view" id="view-charts">
-        <h2 class="block-title">Charts &amp; Allokation</h2>
+        <h2 class="block-title">Allokation</h2>
         <div class="chart-grid">
           <div class="chart-card">
             <h3>Allokation nach Sektor</h3>
@@ -196,7 +195,7 @@
 
       <!-- INCOME PROJECTION -->
       <section class="block view" id="view-income">
-        <h2 class="block-title">Einkommens-Prognose</h2>
+        <h2 class="block-title">Einkommensprognose</h2>
         <p class="block-note">
           Brutto- und <strong>Nettodividende</strong> (nach Steuer gemäß taxRate aus der CSV) sowie eine
           Hochrechnung mit dem einkommensgewichteten Dividenden-CAGR. Steuerliche Vereinfachung ohne
@@ -221,7 +220,7 @@
 
       <!-- ACTION IDEAS -->
       <section class="block view" id="view-actions">
-        <h2 class="block-title">Action Ideas</h2>
+        <h2 class="block-title">Einordnung der Werte</h2>
         <p class="block-note">
           Gruppierung als Orientierung – <strong>keine Anlageberatung</strong>. Für eine genauere
           Entscheidung wären zusätzliche Fundamentaldaten nötig.
@@ -231,7 +230,7 @@
 
       <!-- TOP-UP PLAN (1.000 € tranches) -->
       <section class="block view" id="view-topup">
-        <h2 class="block-title">Aufstock-Plan in 1.000-€-Tranchen</h2>
+        <h2 class="block-title">Aufstockplan (1.000-€-Tranchen)</h2>
         <p class="block-note">
           Vorschlag, welche Werte du auf Basis der Analyse als Nächstes aufstocken könntest –
           aufgeteilt in Tranchen von je 1.000 €. Aus deiner CSV, dem Score-Ranking und der
@@ -326,17 +325,6 @@
           </table>
         </div>
       </section>
-
-      <!-- LIMITATIONS -->
-      <section class="block view" id="view-info">
-        <h2 class="block-title">Grenzen von V1</h2>
-        <div class="info-box">
-          V1 nutzt <strong>keine</strong> externe API-Anreicherung. Kennzahlen wie Payout Ratio,
-          Free-Cash-Flow-Payout, Verschuldungsmetriken, Dividenden-Streak, Analystenratings oder
-          ein Bewertungs-Score sind nicht enthalten. Wo Daten fehlen, gilt:
-          <em>„Für diese Kennzahl sind externe Fundamentaldaten nötig.“</em>
-        </div>
-      </section>
     </div>
   </main>
 
@@ -350,9 +338,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=11"></script>
-  <script src="scoring.js?v=11"></script>
-  <script src="insights.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="formatting.js?v=12"></script>
+  <script src="scoring.js?v=12"></script>
+  <script src="insights.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>
