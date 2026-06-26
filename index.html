@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dividend Portfolio Analyzer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ============================ HEADER ============================ -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-text">
+        <h1>Dividend Portfolio Analyzer</h1>
+        <p class="subtitle">CSV-basierte Depotanalyse für Dividenden, Wachstum, Risiko und Allokation</p>
+      </div>
+      <div class="header-actions">
+        <label class="upload-btn">
+          <input type="file" id="csvFile" accept=".csv,text/csv" hidden />
+          <span>📁 DivvyDiary-CSV laden</span>
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="errorBox" class="error-box hidden"></div>
+
+    <!-- ====================== EMPTY STATE ====================== -->
+    <section id="emptyState" class="empty-state">
+      <div class="empty-card">
+        <div class="empty-icon">📊</div>
+        <h2>Lade deine DivvyDiary-CSV, um zu starten</h2>
+        <p>
+          Diese App analysiert deinen DivvyDiary-Portfolio-Export <strong>vollständig lokal im Browser</strong>.
+          Es werden keine Daten hochgeladen oder gespeichert.
+        </p>
+        <ul class="empty-list">
+          <li>Exportiere dein Depot aus DivvyDiary als CSV (Semikolon-getrennt).</li>
+          <li>Klicke oben rechts auf <strong>„DivvyDiary-CSV laden“</strong>.</li>
+          <li>Erhalte sofort Kennzahlen, Charts, Scores und Insights.</li>
+        </ul>
+        <div class="info-box">
+          <strong>Hinweis zur Datenqualität · CSV-only Analyse</strong>
+          Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
+          Payout Ratio, Free Cash Flow Coverage oder Verschuldung sind in V1 nicht enthalten.
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== DASHBOARD ====================== -->
+    <div id="dashboard" class="hidden">
+
+      <!-- Data quality indicator -->
+      <div class="info-box data-quality">
+        <strong>CSV-only Analyse (V1)</strong>
+        Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
+        Payout Ratio, Free Cash Flow Coverage, Verschuldung (Debt/EBITDA) oder Dividenden-Streak
+        sind in V1 <strong>nicht enthalten</strong> und werden nicht erfunden. Fehlende Werte
+        werden als <code>n/a</code> angezeigt.
+      </div>
+
+      <!-- KPI CARDS -->
+      <section class="block">
+        <h2 class="block-title">Portfolio-Übersicht</h2>
+        <div id="kpiGrid" class="kpi-grid"></div>
+      </section>
+
+      <!-- CHARTS -->
+      <section class="block">
+        <h2 class="block-title">Charts &amp; Allokation</h2>
+        <div class="chart-grid">
+          <div class="chart-card">
+            <h3>Allokation nach Sektor</h3>
+            <div class="chart-wrap"><canvas id="chartSector"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Allokation nach Land</h3>
+            <div class="chart-wrap"><canvas id="chartCountry"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Allokation nach Wertpapierart</h3>
+            <div class="chart-wrap"><canvas id="chartType"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Top 10 Positionen nach Marktwert</h3>
+            <div class="chart-wrap"><canvas id="chartTopValue"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Top 10 Positionen nach jährlicher Dividende</h3>
+            <div class="chart-wrap"><canvas id="chartTopDiv"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <h3>Dividendenbeitrag nach Sektor</h3>
+            <div class="chart-wrap"><canvas id="chartDivSector"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACTION IDEAS -->
+      <section class="block">
+        <h2 class="block-title">Action Ideas</h2>
+        <p class="block-note">
+          Gruppierung als Orientierung – <strong>keine Anlageberatung</strong>. Für eine genauere
+          Entscheidung wären zusätzliche Fundamentaldaten nötig.
+        </p>
+        <div id="actionIdeas" class="action-grid"></div>
+      </section>
+
+      <!-- POSITION TABLE -->
+      <section class="block">
+        <h2 class="block-title">Positionsübersicht</h2>
+        <div class="table-controls">
+          <input type="text" id="searchInput" class="ctrl" placeholder="Suche: Symbol, Name oder ISIN" />
+          <select id="sectorFilter" class="ctrl"></select>
+          <select id="countryFilter" class="ctrl"></select>
+          <select id="actionFilter" class="ctrl"></select>
+          <select id="sortSelect" class="ctrl">
+            <option value="value">Sortieren: Marktwert</option>
+            <option value="dividend">Sortieren: Jährliche Dividende</option>
+            <option value="allocation">Sortieren: Depotanteil</option>
+            <option value="yield">Sortieren: Dividendenrendite</option>
+            <option value="cagr">Sortieren: Dividenden-CAGR</option>
+            <option value="score">Sortieren: Score</option>
+          </select>
+        </div>
+        <div class="table-count" id="tableCount"></div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Name</th>
+                <th class="t-num">Wert</th>
+                <th class="t-num">Anteil</th>
+                <th class="t-num">G/V %</th>
+                <th class="t-num">Div.-Rendite</th>
+                <th class="t-num">Yield on Cost</th>
+                <th class="t-num">Jährl. Div.</th>
+                <th class="t-num">Div.-CAGR</th>
+                <th class="t-num">Score</th>
+                <th>Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- DETAILED POSITION CARDS -->
+      <section class="block">
+        <h2 class="block-title">Detaillierte Positionsanalyse</h2>
+        <div id="detailCards" class="detail-grid"></div>
+      </section>
+
+      <!-- INACTIVE SECTION -->
+      <section id="inactiveSection" class="block hidden">
+        <h2 class="block-title">Inaktiv / Sold / Watchlist <span class="count-badge" id="inactiveCount">0</span></h2>
+        <p class="block-note">
+          Positionen mit Marktwert = 0 werden aus den aktiven Portfolio-Berechnungen ausgeschlossen
+          und hier separat gelistet.
+        </p>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Name</th>
+                <th>ISIN</th>
+                <th>Sektor</th>
+                <th>Land</th>
+                <th>Art</th>
+                <th class="t-num">Div.-Rendite</th>
+                <th>Frequenz</th>
+              </tr>
+            </thead>
+            <tbody id="inactiveBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- LIMITATIONS -->
+      <section class="block">
+        <h2 class="block-title">Grenzen von V1</h2>
+        <div class="info-box">
+          V1 nutzt <strong>keine</strong> externe API-Anreicherung. Kennzahlen wie Payout Ratio,
+          Free-Cash-Flow-Payout, Verschuldungsmetriken, Dividenden-Streak, Analystenratings oder
+          ein Bewertungs-Score sind nicht enthalten. Wo Daten fehlen, gilt:
+          <em>„Für diese Kennzahl sind externe Fundamentaldaten nötig.“</em>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <p>Dividend Portfolio Analyzer · V1 · Lokale CSV-Analyse · Keine Anlageberatung</p>
+  </footer>
+
+  <!-- ====================== DEPENDENCIES (CDN) ====================== -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- ====================== APP MODULES ====================== -->
+  <script src="formatting.js"></script>
+  <script src="scoring.js"></script>
+  <script src="insights.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
