@@ -386,6 +386,55 @@ code {
 .score-weak { background: rgba(243,156,18,0.16); color: var(--orange); }
 .score-critical { background: var(--red-soft); color: var(--red); }
 
+/* ------------------------- Detail master-detail ------------------- */
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 64px;
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.detail-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.detail-list-item:hover { border-color: var(--border-strong); }
+.detail-list-item.active { border-color: var(--green); background: var(--bg-elev-2); }
+.dli-main { display: flex; flex-direction: column; min-width: 0; }
+.dli-sym { font-weight: 700; font-size: 13px; }
+.dli-name {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+.dli-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 0 0 auto; }
+.dli-value { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.detail-panel { min-width: 0; }
+
 /* ------------------------- Detail cards --------------------------- */
 .detail-grid {
   display: grid;
@@ -495,6 +544,9 @@ code {
   .chart-grid, .detail-grid, .action-grid { grid-template-columns: 1fr; }
   .chart-grid { gap: 14px; }
   .dc-grid { grid-template-columns: 1fr; }
+  /* Stack master-detail: list on top (scrollable), details below. */
+  .detail-layout { grid-template-columns: 1fr; }
+  .detail-list { position: static; max-height: 260px; }
   .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .kpi-value { font-size: 18px; }
   .upload-btn { width: 100%; justify-content: center; }

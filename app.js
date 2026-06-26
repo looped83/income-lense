@@ -400,7 +400,15 @@ function renderCharts() {
     options: doughnutOpts(),
   });
 
-  // 4) Top 10 positions by market value
+  // 4) Allocation by currency (underlying / original dividend currency exposure)
+  const currency = toSorted(aggregateBy('originalDividendCurrency'));
+  STATE.charts.currency = new Chart(ctxOf('chartCurrency'), {
+    type: 'doughnut',
+    data: pieData(currency),
+    options: doughnutOpts(),
+  });
+
+  // 5) Top 10 positions by market value
   const topValue = topPositions('value', 10);
   STATE.charts.topValue = new Chart(ctxOf('chartTopValue'), {
     type: 'bar',
@@ -546,13 +554,50 @@ function renderTable() {
 }
 
 /* ----------------------------------------------------------------------------
- * Detailed position analysis cards
+ * Detailed position analysis (master-detail)
+ * Left: a selectable list of positions. Right: details of the selected one.
+ * Keeps the page short instead of stacking one big card per position.
  * --------------------------------------------------------------------------*/
+let DETAIL_SORTED = []; // positions in the order shown in the list
+
 function renderDetailCards() {
-  const container = document.getElementById('detailCards');
-  // Sort detail cards by total score (strongest first).
-  const sorted = [...STATE.active].sort((a, b) => b.scores.total - a.scores.total);
-  container.innerHTML = sorted.map(detailCardHtml).join('');
+  // Sort by total score (strongest first).
+  DETAIL_SORTED = [...STATE.active].sort((a, b) => b.scores.total - a.scores.total);
+
+  const list = document.getElementById('detailList');
+  list.innerHTML = DETAIL_SORTED.map(detailListItemHtml).join('');
+  list.querySelectorAll('.detail-list-item').forEach((el) => {
+    el.addEventListener('click', () => selectDetail(el.dataset.symbol));
+  });
+
+  // Select the first (highest-scoring) position by default.
+  if (DETAIL_SORTED.length) selectDetail(DETAIL_SORTED[0].symbol);
+}
+
+/** A single clickable row in the position list. */
+function detailListItemHtml(p) {
+  const interp = interpretScore(p.scores.total);
+  return `
+    <button type="button" class="detail-list-item" data-symbol="${escapeHtml(p.symbol)}">
+      <span class="dli-main">
+        <span class="dli-sym">${escapeHtml(p.symbol)}</span>
+        <span class="dli-name">${escapeHtml(p.name)}</span>
+      </span>
+      <span class="dli-meta">
+        <span class="dli-value">${fmtCurrency(p.value)}</span>
+        <span class="score-pill ${interp.cls}">${p.scores.total}</span>
+      </span>
+    </button>`;
+}
+
+/** Render the detail panel for the selected symbol and highlight the list row. */
+function selectDetail(symbol) {
+  const p = DETAIL_SORTED.find((x) => x.symbol === symbol);
+  if (!p) return;
+  document.querySelectorAll('.detail-list-item').forEach((el) => {
+    el.classList.toggle('active', el.dataset.symbol === symbol);
+  });
+  document.getElementById('detailPanel').innerHTML = detailCardHtml(p);
 }
 
 function detailCardHtml(p) {

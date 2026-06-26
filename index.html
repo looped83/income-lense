@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -90,6 +90,10 @@
             <div class="chart-wrap"><canvas id="chartType"></canvas></div>
           </div>
           <div class="chart-card">
+            <h3>Allokation nach Währung</h3>
+            <div class="chart-wrap"><canvas id="chartCurrency"></canvas></div>
+          </div>
+          <div class="chart-card">
             <h3>Top 10 Positionen nach Marktwert</h3>
             <div class="chart-wrap"><canvas id="chartTopValue"></canvas></div>
           </div>
@@ -154,10 +158,15 @@
         </div>
       </section>
 
-      <!-- DETAILED POSITION CARDS -->
+      <!-- DETAILED POSITION ANALYSIS (master-detail) -->
       <section class="block view" id="view-details">
         <h2 class="block-title">Detaillierte Positionsanalyse</h2>
-        <div id="detailCards" class="detail-grid"></div>
+        <div class="detail-layout">
+          <!-- Left: selectable list of all active positions -->
+          <aside class="detail-list" id="detailList" aria-label="Positionsliste"></aside>
+          <!-- Right: details of the selected position -->
+          <div class="detail-panel" id="detailPanel"></div>
+        </div>
       </section>
 
       <!-- INACTIVE SECTION -->
@@ -209,9 +218,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=3"></script>
-  <script src="scoring.js?v=3"></script>
-  <script src="insights.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="formatting.js?v=4"></script>
+  <script src="scoring.js?v=4"></script>
+  <script src="insights.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
