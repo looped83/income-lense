@@ -583,7 +583,7 @@ function detailCardHtml(p) {
       </div>
       <div class="score-circle" style="--clr:${scoreColor(s.total)}">
         <svg viewBox="0 0 120 120">
-          <circle class="sc-track" cx="60" cy="60" r="52"></circle>
+          <!-- No background track ring: only the colored progress arc is drawn. -->
           <circle class="sc-prog" cx="60" cy="60" r="52"
             stroke-dasharray="${(s.total / 100) * 326.7} 326.7"></circle>
         </svg>
