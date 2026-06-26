@@ -581,7 +581,7 @@ function detailCardHtml(p) {
         <div class="dc-name">${escapeHtml(p.name)}</div>
         <div class="dc-meta">${escapeHtml(p.isin)} · ${escapeHtml(p.sector)} · ${fmtCountry(p.country)} · ${fmtSecurityType(p.securityType)}</div>
       </div>
-      <div class="score-circle ${interp.cls}" style="--clr:${scoreColor(s.total)}">
+      <div class="score-circle" style="--clr:${scoreColor(s.total)}">
         <svg viewBox="0 0 120 120">
           <circle class="sc-track" cx="60" cy="60" r="52"></circle>
           <circle class="sc-prog" cx="60" cy="60" r="52"

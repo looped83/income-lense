@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dividend Portfolio Analyzer</title>
+  <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
@@ -13,7 +13,7 @@
   <header class="app-header">
     <div class="header-inner">
       <div class="header-text">
-        <h1>Dividend Portfolio Analyzer</h1>
+        <h1>Income Lense</h1>
         <p class="subtitle">CSV-basierte Depotanalyse für Dividenden, Wachstum, Risiko und Allokation</p>
       </div>
       <div class="header-actions">
@@ -70,14 +70,6 @@
       <!-- KPI CARDS -->
       <section class="block view active" id="view-overview">
         <h2 class="block-title">Portfolio-Übersicht</h2>
-        <!-- Data quality indicator -->
-        <div class="info-box data-quality">
-          <strong>CSV-only Analyse (V1)</strong>
-          Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
-          Payout Ratio, Free Cash Flow Coverage, Verschuldung (Debt/EBITDA) oder Dividenden-Streak
-          sind in V1 <strong>nicht enthalten</strong> und werden nicht erfunden. Fehlende Werte
-          werden als <code>n/a</code> angezeigt.
-        </div>
         <div id="kpiGrid" class="kpi-grid"></div>
       </section>
 
@@ -208,7 +200,7 @@
   </main>
 
   <footer class="app-footer">
-    <p>Dividend Portfolio Analyzer · V1 · Lokale CSV-Analyse · Keine Anlageberatung</p>
+    <p>Income Lense · V1 · Lokale CSV-Analyse · Keine Anlageberatung</p>
   </footer>
 
   <!-- ====================== DEPENDENCIES (CDN) ====================== -->

@@ -414,7 +414,7 @@ code {
 /* Score circle */
 .score-circle { position: relative; width: 92px; height: 92px; flex: 0 0 auto; }
 .score-circle svg { transform: rotate(-90deg); width: 92px; height: 92px; }
-.sc-track { fill: none; stroke: var(--bg-elev-2); stroke-width: 9; }
+.sc-track { fill: none; stroke: transparent; stroke-width: 9; }
 .sc-prog {
   fill: none;
   stroke: var(--clr, var(--green));
