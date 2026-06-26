@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -53,21 +53,10 @@
     <section id="emptyState" class="empty-state">
       <div class="empty-card">
         <div class="empty-icon">📊</div>
-        <h2>Lade deine DivvyDiary-CSV, um zu starten</h2>
-        <p>
-          Diese App analysiert deinen DivvyDiary-Portfolio-Export <strong>vollständig lokal im Browser</strong>.
-          Es werden keine Daten hochgeladen oder gespeichert.
-        </p>
-        <ul class="empty-list">
-          <li>Exportiere dein Depot aus DivvyDiary als CSV (Semikolon-getrennt).</li>
-          <li>Klicke oben rechts auf <strong>„DivvyDiary-CSV laden“</strong>.</li>
-          <li>Erhalte sofort Kennzahlen, Charts, Scores und Insights.</li>
-        </ul>
-        <div class="info-box">
-          <strong>Hinweis zur Datenqualität · CSV-only Analyse</strong>
-          Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
-          Payout Ratio, Free Cash Flow Coverage oder Verschuldung sind in V1 nicht enthalten.
-        </div>
+        <h2>DivvyDiary-CSV laden</h2>
+        <button type="button" class="empty-upload" onclick="document.getElementById('csvFile').click()">
+          CSV auswählen
+        </button>
       </div>
     </section>
 
@@ -338,9 +327,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=12"></script>
-  <script src="scoring.js?v=12"></script>
-  <script src="insights.js?v=12"></script>
-  <script src="app.js?v=12"></script>
+  <script src="formatting.js?v=13"></script>
+  <script src="scoring.js?v=13"></script>
+  <script src="insights.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>
