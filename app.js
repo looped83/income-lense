@@ -44,7 +44,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', renderTable);
   });
+
+  setupNav();
 });
+
+/* ----------------------------------------------------------------------------
+ * Navigation: each nav item shows exactly one "page" (view) at a time.
+ * --------------------------------------------------------------------------*/
+function setupNav() {
+  document.querySelectorAll('.nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => showView(btn.dataset.view));
+  });
+}
+
+/** Show a single view by id and mark the matching nav item active. */
+function showView(viewId) {
+  document.querySelectorAll('.view').forEach((v) => {
+    v.classList.toggle('active', v.id === viewId);
+  });
+  document.querySelectorAll('.nav-item').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === viewId);
+  });
+
+  // Charts are created while their container may be hidden (zero size). When the
+  // charts view becomes visible, resize them so they fill their cards correctly.
+  if (viewId === 'view-charts') {
+    Object.values(STATE.charts).forEach((c) => c && c.resize());
+  }
+
+  // Jump back to the top so each "page" starts at its heading.
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
 
 /* ----------------------------------------------------------------------------
  * CSV loading & parsing
@@ -127,9 +157,10 @@ function handleParsedData(rows) {
     p.action = classifyAction(p, p.scores, STATE.ctx);
   });
 
-  // Reveal the dashboard and render everything.
+  // Reveal the dashboard + navigation and render everything.
   document.getElementById('emptyState').classList.add('hidden');
   document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('mainNav').classList.remove('hidden');
 
   populateFilters();
   renderKpis();
@@ -138,6 +169,9 @@ function handleParsedData(rows) {
   renderDetailCards();
   renderActionIdeas();
   renderInactive();
+
+  // Always start on the overview "page".
+  showView('view-overview');
 }
 
 /* ----------------------------------------------------------------------------
@@ -627,13 +661,14 @@ function renderActionIdeas() {
  * Inactive / sold / watchlist section
  * --------------------------------------------------------------------------*/
 function renderInactive() {
-  const section = document.getElementById('inactiveSection');
+  const navBtn = document.getElementById('navInactive');
   const tbody = document.getElementById('inactiveBody');
+  // No inactive positions -> hide the nav entry for this page entirely.
   if (!STATE.inactive.length) {
-    section.classList.add('hidden');
+    navBtn.classList.add('hidden');
     return;
   }
-  section.classList.remove('hidden');
+  navBtn.classList.remove('hidden');
   document.getElementById('inactiveCount').textContent = STATE.inactive.length;
 
   tbody.innerHTML = STATE.inactive

@@ -25,6 +25,20 @@
     </div>
   </header>
 
+  <!-- ============================ NAVIGATION ============================ -->
+  <!-- Sticky tab navigation. Each entry shows one section ("page") at a time. -->
+  <nav id="mainNav" class="main-nav hidden" aria-label="Bereichsnavigation">
+    <div class="main-nav-inner">
+      <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
+      <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
+      <button type="button" class="nav-item" data-view="view-actions">Action Ideas</button>
+      <button type="button" class="nav-item" data-view="view-table">Positionen</button>
+      <button type="button" class="nav-item" data-view="view-details">Detailanalyse</button>
+      <button type="button" class="nav-item hidden" id="navInactive" data-view="view-inactive">Inaktiv / Watchlist</button>
+      <button type="button" class="nav-item" data-view="view-info">Info &amp; Grenzen</button>
+    </div>
+  </nav>
+
   <main class="container">
     <div id="errorBox" class="error-box hidden"></div>
 
@@ -53,23 +67,22 @@
     <!-- ====================== DASHBOARD ====================== -->
     <div id="dashboard" class="hidden">
 
-      <!-- Data quality indicator -->
-      <div class="info-box data-quality">
-        <strong>CSV-only Analyse (V1)</strong>
-        Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
-        Payout Ratio, Free Cash Flow Coverage, Verschuldung (Debt/EBITDA) oder Dividenden-Streak
-        sind in V1 <strong>nicht enthalten</strong> und werden nicht erfunden. Fehlende Werte
-        werden als <code>n/a</code> angezeigt.
-      </div>
-
       <!-- KPI CARDS -->
-      <section class="block">
+      <section class="block view active" id="view-overview">
         <h2 class="block-title">Portfolio-Übersicht</h2>
+        <!-- Data quality indicator -->
+        <div class="info-box data-quality">
+          <strong>CSV-only Analyse (V1)</strong>
+          Diese Analyse basiert ausschließlich auf deiner DivvyDiary-CSV. Fundamentaldaten wie
+          Payout Ratio, Free Cash Flow Coverage, Verschuldung (Debt/EBITDA) oder Dividenden-Streak
+          sind in V1 <strong>nicht enthalten</strong> und werden nicht erfunden. Fehlende Werte
+          werden als <code>n/a</code> angezeigt.
+        </div>
         <div id="kpiGrid" class="kpi-grid"></div>
       </section>
 
       <!-- CHARTS -->
-      <section class="block">
+      <section class="block view" id="view-charts">
         <h2 class="block-title">Charts &amp; Allokation</h2>
         <div class="chart-grid">
           <div class="chart-card">
@@ -100,7 +113,7 @@
       </section>
 
       <!-- ACTION IDEAS -->
-      <section class="block">
+      <section class="block view" id="view-actions">
         <h2 class="block-title">Action Ideas</h2>
         <p class="block-note">
           Gruppierung als Orientierung – <strong>keine Anlageberatung</strong>. Für eine genauere
@@ -110,7 +123,7 @@
       </section>
 
       <!-- POSITION TABLE -->
-      <section class="block">
+      <section class="block view" id="view-table">
         <h2 class="block-title">Positionsübersicht</h2>
         <div class="table-controls">
           <input type="text" id="searchInput" class="ctrl" placeholder="Suche: Symbol, Name oder ISIN" />
@@ -150,13 +163,13 @@
       </section>
 
       <!-- DETAILED POSITION CARDS -->
-      <section class="block">
+      <section class="block view" id="view-details">
         <h2 class="block-title">Detaillierte Positionsanalyse</h2>
         <div id="detailCards" class="detail-grid"></div>
       </section>
 
       <!-- INACTIVE SECTION -->
-      <section id="inactiveSection" class="block hidden">
+      <section id="view-inactive" class="block view">
         <h2 class="block-title">Inaktiv / Sold / Watchlist <span class="count-badge" id="inactiveCount">0</span></h2>
         <p class="block-note">
           Positionen mit Marktwert = 0 werden aus den aktiven Portfolio-Berechnungen ausgeschlossen
@@ -182,7 +195,7 @@
       </section>
 
       <!-- LIMITATIONS -->
-      <section class="block">
+      <section class="block view" id="view-info">
         <h2 class="block-title">Grenzen von V1</h2>
         <div class="info-box">
           V1 nutzt <strong>keine</strong> externe API-Anreicherung. Kennzahlen wie Payout Ratio,
