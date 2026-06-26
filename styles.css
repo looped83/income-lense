@@ -455,6 +455,34 @@ code {
 .conc-val { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); min-width: 48px; text-align: right; }
 .conc-empty { color: var(--text-faint); font-size: 12px; }
 
+/* ----------------------- Recommendations -------------------------- */
+.rec-list { display: flex; flex-direction: column; gap: 12px; }
+.rec-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+}
+.rec-card.rec-high { border-left-color: var(--red); }
+.rec-card.rec-mid { border-left-color: var(--orange); }
+.rec-card.rec-low { border-left-color: var(--green); }
+.rec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.rec-badge-high { background: var(--red-soft); color: var(--red); }
+.rec-badge-mid { background: rgba(243, 156, 18, 0.16); color: var(--orange); }
+.rec-badge-low { background: var(--green-soft); color: var(--green); }
+.rec-cat {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px 9px;
+}
+.rec-title { font-weight: 700; font-size: 14px; }
+.rec-text { color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+
 /* ------------------- Calendar & income projection ----------------- */
 .cal-section { margin-top: 26px; }
 .risk-subtitle-note { font-size: 12px; font-weight: 500; color: var(--text-dim); }

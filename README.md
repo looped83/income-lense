@@ -9,6 +9,7 @@ Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://d
 ## Was die App macht
 
 - **Portfolio-Kennzahlen (KPIs):** Depotwert, investiertes Kapital, unrealisiertes Plus/Minus (absolut & %), jährliche/monatliche Bruttodividende, gewichtete Dividendenrendite, gewichteter Yield on Cost, Anzahl aktiver Positionen & Dividendenzahler, größte Position, größter Dividendenzahler.
+- **Handlungsempfehlungen:** Individuelle, priorisierte Empfehlungen für das Depot (Hoch/Mittel/Chance), abgeleitet aus Scores, Konzentration, Wachstum und Einkommen – z. B. Länder-/Sektor-/Einkommensklumpen, Übergewichtungen, Renditefallen, kritische Scores und untergewichtete Qualitätswerte. Bewusst abwägende, nicht-beratende Wortwahl.
 - **Charts (Chart.js):** Allokation nach Sektor, Land und Wertpapierart; Top 10 nach Marktwert; Top 10 nach jährlicher Dividende; Dividendenbeitrag nach Sektor.
 - **Positionsübersicht:** sortier- und filterbare Tabelle (Suche, Sektor, Land, Aktionskategorie; Sortierung nach Wert, Dividende, Anteil, Rendite, CAGR, Score).
 - **Detaillierte Positionskarten:** je aktiver Position ein großer Score-Kreis (0–100), fünf Teil-Scores (Sicherheit, Einkommen, Wachstum, Depot-Fit, Konzentrationsrisiko), alle relevanten Kennzahlen und 3–6 automatische Insights.
@@ -23,7 +24,7 @@ Alle Werte werden **aus der hochgeladenen CSV berechnet** – nichts ist hartkod
 
 ### Navigation
 
-Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Charts & Allokation**, **Risiko & Konzentration**, **Dividendenkalender**, **Einkommens-Prognose**, **Action Ideas**, **Aufstock-Plan**, **Positionen**, **Detailanalyse**, **Inaktiv / Watchlist** (nur falls vorhanden) und **Info & Grenzen**. Es ist immer nur ein Bereich sichtbar.
+Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Handlungsempfehlungen**, **Charts & Allokation**, **Risiko & Konzentration**, **Dividendenkalender**, **Einkommens-Prognose**, **Action Ideas**, **Aufstock-Plan**, **Positionen**, **Detailanalyse**, **Inaktiv / Watchlist** (nur falls vorhanden) und **Info & Grenzen**. Es ist immer nur ein Bereich sichtbar.
 
 ---
 
