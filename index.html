@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -32,6 +32,8 @@
       <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
       <button type="button" class="nav-item" data-view="view-charts">Charts &amp; Allokation</button>
       <button type="button" class="nav-item" data-view="view-risk">Risiko &amp; Konzentration</button>
+      <button type="button" class="nav-item" data-view="view-calendar">Dividendenkalender</button>
+      <button type="button" class="nav-item" data-view="view-income">Einkommens-Prognose</button>
       <button type="button" class="nav-item" data-view="view-actions">Action Ideas</button>
       <button type="button" class="nav-item" data-view="view-topup">Aufstock-Plan</button>
       <button type="button" class="nav-item" data-view="view-table">Positionen</button>
@@ -139,6 +141,66 @@
             <h3>Länder-Allokation</h3>
             <div id="riskCountries" class="conc-list"></div>
           </div>
+        </div>
+      </section>
+
+      <!-- DIVIDEND CALENDAR -->
+      <section class="block view" id="view-calendar">
+        <h2 class="block-title">Dividendenkalender</h2>
+        <p class="block-note">
+          Erwartete <strong>Bruttoausschüttung je Monat</strong> auf Basis von Zahltermin (payDate) und
+          Frequenz aus der CSV. Da nur der nächste Termin je Position vorliegt, werden die übrigen
+          Zahlungen anhand der Frequenz auf das Jahr verteilt. <strong>Keine Anlageberatung.</strong>
+        </p>
+        <div id="calendarKpis" class="kpi-grid"></div>
+
+        <div class="cal-section">
+          <h3 class="risk-subtitle">Erwartete Ausschüttung pro Monat (brutto)</h3>
+          <div id="calMonths" class="cal-months"></div>
+        </div>
+
+        <div class="cal-section">
+          <h3 class="risk-subtitle">Kommende Termine</h3>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Ex-Tag</th>
+                  <th>Zahltag</th>
+                  <th>Symbol</th>
+                  <th>Name</th>
+                  <th>Frequenz</th>
+                  <th class="t-num">Betrag (Zahlung)</th>
+                </tr>
+              </thead>
+              <tbody id="calUpcoming"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- INCOME PROJECTION -->
+      <section class="block view" id="view-income">
+        <h2 class="block-title">Einkommens-Prognose</h2>
+        <p class="block-note">
+          Brutto- und <strong>Nettodividende</strong> (nach Steuer gemäß taxRate aus der CSV) sowie eine
+          Hochrechnung mit dem einkommensgewichteten Dividenden-CAGR. Steuerliche Vereinfachung ohne
+          Sparer-Pauschbetrag – <strong>keine Steuer- oder Anlageberatung.</strong>
+        </p>
+        <div id="incomeKpis" class="kpi-grid"></div>
+
+        <div class="cal-section">
+          <h3 class="risk-subtitle">Monatliche Dividende: netto (grün) vs. brutto</h3>
+          <div id="incomeMonths" class="cal-months"></div>
+        </div>
+
+        <div class="cal-section">
+          <h3 class="risk-subtitle">Hochrechnung jährliche Nettodividende <span id="incomeCagr" class="risk-subtitle-note"></span></h3>
+          <div id="incomeProjection" class="cal-months"></div>
+          <p class="block-note">
+            Annahme: konstantes Dividendenwachstum auf Basis des historischen, einkommensgewichteten
+            CAGR. Vergangene Wachstumsraten sind keine Garantie für die Zukunft.
+          </p>
         </div>
       </section>
 
@@ -273,9 +335,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=8"></script>
-  <script src="scoring.js?v=8"></script>
-  <script src="insights.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="formatting.js?v=9"></script>
+  <script src="scoring.js?v=9"></script>
+  <script src="insights.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

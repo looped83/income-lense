@@ -170,6 +170,8 @@ function handleParsedData(rows) {
   renderKpis();
   renderCharts();
   renderRisk();
+  renderCalendar();
+  renderIncome();
   renderTable();
   renderDetailCards();
   renderActionIdeas();
@@ -900,6 +902,245 @@ function renderRisk() {
       sev: isGeneric(k) ? null : v > 0.6 ? 'high' : v > 0.45 ? 'mid' : null,
     }))
   );
+}
+
+/* ----------------------------------------------------------------------------
+ * Dividend calendar & income projection — shared helpers
+ * ----------------------------------------------------------------------------
+ * Only the next payDate per position is in the CSV, so the remaining payments
+ * are spread over the year from the payDate's month according to the frequency.
+ * Everything is derived from the CSV (totalDividendRate, frequency, payDate,
+ * taxRate, dividendCagr).
+ * --------------------------------------------------------------------------*/
+const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+/** Number of payouts per year for a frequency (0 = none). */
+function paymentsPerYear(freq) {
+  switch ((freq || '').toLowerCase()) {
+    case 'monthly': return 12;
+    case 'quarterly': return 4;
+    case 'biannually': return 2;
+    case 'annually': return 1;
+    default: return 0;
+  }
+}
+
+/** Calendar months (0=Jan) a position pays in, anchored on its payDate month. */
+function payMonths(freq, anchorMonth) {
+  const ppy = paymentsPerYear(freq);
+  if (ppy === 0) return [];
+  if (ppy === 12) return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  const step = 12 / ppy;
+  const anchor = anchorMonth >= 0 ? anchorMonth : 0;
+  const out = [];
+  for (let k = 0; k < ppy; k++) out.push((anchor + k * step) % 12);
+  return out;
+}
+
+/** Month index (0..11) from an ISO date, or -1. */
+function monthIndexOf(dateStr) {
+  const m = String(dateStr || '').match(/^\d{4}-(\d{2})-\d{2}$/);
+  return m ? parseInt(m[1], 10) - 1 : -1;
+}
+
+/** Parse an ISO date (YYYY-MM-DD) into a Date at local midnight, or null. */
+function parseISODate(s) {
+  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+/** Per-month gross & net dividend distribution across the calendar year. */
+function computeIncomeDistribution() {
+  const gross = new Array(12).fill(0);
+  const net = new Array(12).fill(0);
+  STATE.active.forEach((p) => {
+    const total = num0(p.totalDividendRate);
+    const ppy = paymentsPerYear(p.dividendFrequency);
+    if (total <= 0 || ppy === 0) return;
+    const months = payMonths(p.dividendFrequency, monthIndexOf(p.payDate));
+    if (!months.length) return;
+    const per = total / ppy;
+    const taxRate = hasNum(p.taxRate) ? p.taxRate : 0;
+    months.forEach((mi) => {
+      gross[mi] += per;
+      net[mi] += per * (1 - taxRate);
+    });
+  });
+  const grossAnnual = gross.reduce((s, v) => s + v, 0);
+  const netAnnual = net.reduce((s, v) => s + v, 0);
+  return { gross, net, grossAnnual, netAnnual, taxAnnual: grossAnnual - netAnnual };
+}
+
+/** Upcoming dividend payments (next payDate per position), future first. */
+function upcomingPayments() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const list = [];
+  STATE.active.forEach((p) => {
+    const total = num0(p.totalDividendRate);
+    const ppy = paymentsPerYear(p.dividendFrequency);
+    if (total <= 0 || ppy === 0) return;
+    const d = parseISODate(p.payDate);
+    if (!d || d < today) return;
+    list.push({
+      date: d,
+      payDate: p.payDate,
+      exDate: p.exDate,
+      symbol: p.symbol,
+      name: p.name,
+      freq: p.dividendFrequency,
+      per: total / ppy,
+    });
+  });
+  return list.sort((a, b) => a.date - b.date);
+}
+
+/* ----------------------------------------------------------------------------
+ * Dividend calendar rendering
+ * --------------------------------------------------------------------------*/
+function renderCalendar() {
+  if (!STATE.active.length) return;
+  const dist = computeIncomeDistribution();
+  const maxMonth = Math.max(...dist.gross, 0.0001);
+  const currentMonth = new Date().getMonth();
+
+  // Strongest month + averages.
+  let maxIdx = 0;
+  dist.gross.forEach((v, i) => {
+    if (v > dist.gross[maxIdx]) maxIdx = i;
+  });
+  const upcoming = upcomingPayments();
+  const today = new Date();
+  const in30 = new Date();
+  in30.setDate(in30.getDate() + 30);
+  const next30 = upcoming.filter((u) => u.date <= in30);
+  const next30Sum = next30.reduce((s, u) => s + u.per, 0);
+  const monthlyPayers = STATE.active.filter((p) => paymentsPerYear(p.dividendFrequency) === 12 && num0(p.totalDividendRate) > 0).length;
+
+  const cards = [
+    { label: 'Jährliche Bruttodividende', value: fmtCurrency(dist.grossAnnual) },
+    { label: 'Ø Ausschüttung / Monat', value: fmtCurrency(dist.grossAnnual / 12) },
+    { label: 'Stärkster Monat', value: MONTHS_DE[maxIdx], sub: fmtCurrency(dist.gross[maxIdx]) },
+    {
+      label: 'Nächster Zahltag',
+      value: upcoming.length ? fmtDate(upcoming[0].payDate) : 'n/a',
+      sub: upcoming.length ? upcoming[0].symbol : '',
+    },
+    { label: 'Nächste 30 Tage', value: fmtCurrency(next30Sum), sub: `${next30.length} Zahlungen` },
+    { label: 'Monatliche Zahler', value: fmtNumber(monthlyPayers, 0), sub: 'Positionen' },
+  ];
+  document.getElementById('calendarKpis').innerHTML = cards
+    .map(
+      (c) => `<div class="kpi-card kpi-income"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
+    )
+    .join('');
+
+  // Monthly bars.
+  document.getElementById('calMonths').innerHTML = dist.gross
+    .map(
+      (v, i) => `
+      <div class="cal-row ${i === currentMonth ? 'cal-current' : ''}">
+        <span class="cal-mlabel">${MONTHS_DE[i]}</span>
+        <span class="cal-barwrap"><span class="cal-fill" style="width:${((v / maxMonth) * 100).toFixed(1)}%"></span></span>
+        <span class="cal-val">${fmtCurrency(v)}</span>
+      </div>`
+    )
+    .join('');
+
+  // Upcoming table.
+  const tbody = document.getElementById('calUpcoming');
+  if (!upcoming.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="conc-empty">Keine zukünftigen Zahltermine in der CSV.</td></tr>';
+  } else {
+    tbody.innerHTML = upcoming
+      .slice(0, 24)
+      .map(
+        (u) => `
+        <tr>
+          <td>${fmtDate(u.exDate)}</td>
+          <td>${fmtDate(u.payDate)}</td>
+          <td class="t-sym">${escapeHtml(u.symbol)}</td>
+          <td class="t-name" title="${escapeHtml(u.name)}">${escapeHtml(u.name)}</td>
+          <td>${fmtFrequency(u.freq)}</td>
+          <td class="t-num">${fmtCurrency(u.per)}</td>
+        </tr>`
+      )
+      .join('');
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * Income projection rendering
+ * --------------------------------------------------------------------------*/
+function renderIncome() {
+  if (!STATE.active.length) return;
+  const dist = computeIncomeDistribution();
+  const k = STATE.kpis;
+
+  // Income-weighted dividend CAGR.
+  let wSum = 0;
+  let wWeight = 0;
+  STATE.active.forEach((p) => {
+    const t = num0(p.totalDividendRate);
+    if (t > 0 && hasNum(p.dividendCagr)) {
+      wSum += t * p.dividendCagr;
+      wWeight += t;
+    }
+  });
+  const g = wWeight > 0 ? wSum / wWeight : 0;
+
+  const effTaxRate = dist.grossAnnual > 0 ? dist.taxAnnual / dist.grossAnnual : 0;
+  const netYield = k.totalValue > 0 ? dist.netAnnual / k.totalValue : NaN;
+  const netYoc = k.totalInvested > 0 ? dist.netAnnual / k.totalInvested : NaN;
+
+  const cards = [
+    { label: 'Jährliche Bruttodividende', value: fmtCurrency(dist.grossAnnual) },
+    { label: 'Jährliche Nettodividende', value: fmtCurrency(dist.netAnnual) },
+    { label: 'Ø Netto / Monat', value: fmtCurrency(dist.netAnnual / 12) },
+    { label: 'Steuerlast p.a.', value: fmtCurrency(dist.taxAnnual), sub: `effektiv ${fmtPercent(effTaxRate, 1)}` },
+    { label: 'Netto-Dividendenrendite', value: fmtPercent(netYield) },
+    { label: 'Netto Yield on Cost', value: fmtPercent(netYoc) },
+    { label: 'Gewichteter Dividenden-CAGR', value: fmtPercent(g, 1) },
+    { label: 'Netto in 5 Jahren (p.a.)', value: fmtCurrency(dist.netAnnual * Math.pow(1 + g, 5)) },
+  ];
+  document.getElementById('incomeKpis').innerHTML = cards
+    .map(
+      (c) => `<div class="kpi-card kpi-income"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
+    )
+    .join('');
+
+  // Monthly net vs gross bars (net = green segment, remainder = tax).
+  const maxMonth = Math.max(...dist.gross, 0.0001);
+  document.getElementById('incomeMonths').innerHTML = dist.gross
+    .map((gv, i) => {
+      const nv = dist.net[i];
+      const wGross = (gv / maxMonth) * 100;
+      const wNet = gv > 0 ? (nv / gv) * 100 : 0;
+      return `
+      <div class="cal-row">
+        <span class="cal-mlabel">${MONTHS_DE[i]}</span>
+        <span class="cal-barwrap"><span class="inc-track" style="width:${wGross.toFixed(1)}%"><span class="inc-net" style="width:${wNet.toFixed(1)}%"></span></span></span>
+        <span class="cal-val">${fmtCurrency(nv)} <span class="inc-gross">/ ${fmtCurrency(gv)}</span></span>
+      </div>`;
+    })
+    .join('');
+
+  // Projection (current year + 5).
+  document.getElementById('incomeCagr').textContent = `(${fmtPercent(g, 1)} p.a.)`;
+  const baseYear = new Date().getFullYear();
+  const years = [];
+  for (let y = 0; y <= 5; y++) years.push({ year: baseYear + y, value: dist.netAnnual * Math.pow(1 + g, y) });
+  const maxYear = Math.max(...years.map((y) => y.value), 0.0001);
+  document.getElementById('incomeProjection').innerHTML = years
+    .map(
+      (y, i) => `
+      <div class="cal-row ${i === 0 ? 'cal-current' : ''}">
+        <span class="cal-mlabel">${y.year}</span>
+        <span class="cal-barwrap"><span class="cal-fill" style="width:${((y.value / maxYear) * 100).toFixed(1)}%"></span></span>
+        <span class="cal-val">${fmtCurrency(y.value)}</span>
+      </div>`
+    )
+    .join('');
 }
 
 /* ----------------------------------------------------------------------------
