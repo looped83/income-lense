@@ -97,6 +97,52 @@ code {
 }
 .upload-btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
 
+/* --------------------------- Navigation --------------------------- */
+.main-nav {
+  position: sticky;
+  top: 0;
+  z-index: 19;
+  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.main-nav-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.nav-item {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 14px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.nav-item:hover { color: var(--text); }
+.nav-item.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+/* View switching: only the active "page" is shown. */
+.view { display: none; }
+.view.active { display: block; animation: viewFade 0.25s ease; }
+@keyframes viewFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ----------------------------- Layout ----------------------------- */
 .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
 .block { margin-bottom: 36px; }
