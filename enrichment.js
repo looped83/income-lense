@@ -217,14 +217,27 @@ function computeFundamentals(pos, sym, raw) {
     out.fcfCoverage = null;
   }
 
-  // Yield fallback from profile (last dividend / price).
+  // Free-tier fallbacks from quote (EPS + price) — fills payout ratio & yield
+  // when the premium ratios/cash-flow endpoints are blocked.
+  const qt = Array.isArray(raw.quote) && raw.quote[0] ? raw.quote[0] : null;
   const pf = Array.isArray(raw.profile) && raw.profile[0] ? raw.profile[0] : null;
+  const eps = pick(qt, ['eps']);
+  const price = pick(qt, ['price']) ?? pick(pf, ['price']);
   const lastDiv = pick(pf, ['lastDividend', 'lastDiv']);
-  const price = pick(pf, ['price']);
+
+  // Payout ratio = DPS(TTM) / EPS(TTM) when the ratios endpoint gave nothing.
+  if (out.payoutRatio == null && hasNum(out.dpsTTM) && hasNum(eps) && eps > 0) {
+    out.payoutRatio = out.dpsTTM / eps;
+    out.payoutRatioDerived = true;
+  }
+
+  // Yield: prefer FMP ratio, else DPS(TTM)/price, else last dividend/price, else CSV.
+  if (out.dividendYield == null && hasNum(out.dpsTTM) && hasNum(price) && price > 0) {
+    out.dividendYield = out.dpsTTM / price;
+  }
   if (out.dividendYield == null && hasNum(lastDiv) && hasNum(price) && price > 0) {
     out.dividendYield = lastDiv / price;
   }
-  // Fall back to the CSV yield if FMP has none.
   if (out.dividendYield == null && hasNum(pos.dividendYield)) out.dividendYield = pos.dividendYield;
 
   out.score = scoreFundamentals(out);
@@ -244,14 +257,17 @@ async function fetchFundamentals(pos) {
   // Use allSettled so we can surface the real failure reason (HTTP 401/403 vs.
   // network/CORS) instead of silently swallowing it.
   // FMP "stable" API (the legacy /api/v3 endpoints return 403 on current keys).
+  // quote is free and carries EPS + price, which let us derive the payout ratio
+  // and yield even when ratios/cash-flow are blocked on the free tier.
   const s = encodeURIComponent(sym);
   const settled = await Promise.allSettled([
     fmpGet(`stable/dividends?symbol=${s}`),
     fmpGet(`stable/ratios-ttm?symbol=${s}`),
     fmpGet(`stable/cash-flow-statement?symbol=${s}&limit=1`),
     fmpGet(`stable/profile?symbol=${s}`),
+    fmpGet(`stable/quote?symbol=${s}`),
   ]);
-  const [divs, ratios, cf, profile] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
+  const [divs, ratios, cf, profile, quote] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
   const errs = settled.filter((r) => r.status === 'rejected').map((r) => (r.reason && r.reason.message) || 'Fehler');
 
   // FMP error payloads can come back as 200 with an { "Error Message": ... } object.
@@ -272,7 +288,7 @@ async function fetchFundamentals(pos) {
     return na;
   }
 
-  const result = computeFundamentals(pos, sym, { divs, ratios, cf, profile });
+  const result = computeFundamentals(pos, sym, { divs, ratios, cf, profile, quote });
   ENRICH.cache[pos.symbol] = result;
   return result;
 }
