@@ -113,13 +113,23 @@ Verschuldungsmetriken und Analystenratings.
 
 ### Einrichtung der V2-Anreicherung
 
-1. Kostenlosen [FMP-API-Key](https://site.financialmodelingprep.com/developer/docs) holen.
-2. Im Tab **Detailanalyse** den Key in das Eingabefeld einfügen und auf
-   „Speichern & laden" klicken. Der Key wird nur lokal im Browser (localStorage)
-   gespeichert; „API-Key ändern" entfernt ihn wieder.
-3. Alternativ kann der Key fest in `config.js` (`fmpApiKey`) hinterlegt werden.
-   ⚠️ Dann ist er clientseitig sichtbar, sobald die Seite deployed oder `config.js`
-   committet wird – nur einen Key mit engen Limits verwenden. Das In-App-Feld hat Vorrang.
+Zwei Anbieter stehen zur Wahl (Dropdown im Detailanalyse-Tab):
+
+- **Financial Modeling Prep (FMP)** – gute US-Abdeckung; im Free-Tier ohne
+  FCF-Deckung (wird aus EPS/Quote ergänzt, FCF bleibt `n/a`).
+- **EODHD** – bessere **EU/internationale** Abdeckung und liefert i. d. R. auch
+  **FCF-Deckung**. ([Key](https://eodhd.com/))
+
+Schritte:
+1. Kostenlosen API-Key beim gewünschten Anbieter holen
+   ([FMP](https://site.financialmodelingprep.com/developer/docs) · [EODHD](https://eodhd.com/)).
+2. Im Tab **Detailanalyse** den Anbieter wählen, den Key einfügen und auf
+   „Speichern & laden" klicken. Anbieter + Key werden nur lokal im Browser
+   (localStorage) gespeichert; „API-Key ändern" entfernt den Key wieder.
+3. Alternativ lassen sich Keys fest in `config.js` (`fmpApiKey` / `eodhdApiKey`,
+   `provider`) hinterlegen. ⚠️ Dann sind sie clientseitig sichtbar, sobald die
+   Seite deployed oder `config.js` committet wird – nur Keys mit engen Limits
+   verwenden. Das In-App-Feld hat Vorrang.
 
 > Sicherheitshinweis: In einer statischen App ist ein direkt genutzter API-Key prinzipiell
 > im Browser sichtbar. Verwende einen Free-Tier-Key mit engen Limits, den du jederzeit

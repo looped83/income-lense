@@ -717,18 +717,30 @@ function renderFundBar() {
   const bar = document.getElementById('fundBar');
   if (!bar) return;
 
-  // No key yet -> show an inline key input (stored locally in the browser).
+  // No key yet -> show provider choice + inline key input (stored locally).
   if (!ENRICH.enabled()) {
+    const prov = ENRICH.provider();
+    const docLink = prov === 'eodhd' ? 'https://eodhd.com/' : 'https://site.financialmodelingprep.com/developer/docs';
     bar.innerHTML = `
       <div class="fund-keyform">
-        <label class="fund-key-label" for="fundKeyInput">FMP-API-Key eingeben, um Fundamentaldaten zu laden (Payout Ratio, FCF-Deckung, Dividenden-Streak &amp; -Historie):</label>
+        <label class="fund-key-label">Datenanbieter wählen und API-Key eingeben, um Fundamentaldaten zu laden (Payout Ratio, FCF-Deckung, Dividenden-Streak &amp; -Historie):</label>
         <div class="fund-key-row">
-          <input type="password" id="fundKeyInput" class="ctrl" placeholder="FMP-API-Key einfügen" autocomplete="off" spellcheck="false" />
+          <select id="fundProvider" class="ctrl">
+            <option value="fmp"${prov === 'fmp' ? ' selected' : ''}>Financial Modeling Prep</option>
+            <option value="eodhd"${prov === 'eodhd' ? ' selected' : ''}>EODHD (bessere EU/ISIN-Abdeckung)</option>
+          </select>
+          <input type="password" id="fundKeyInput" class="ctrl" placeholder="API-Key einfügen" autocomplete="off" spellcheck="false" />
           <button type="button" class="fund-btn" id="fundKeySave">Speichern &amp; laden</button>
         </div>
-        <div class="fund-key-hint">Wird nur lokal in deinem Browser gespeichert (localStorage), nicht hochgeladen. <a href="https://site.financialmodelingprep.com/developer/docs" target="_blank" rel="noopener">Kostenlosen Key erhalten →</a></div>
+        <div class="fund-key-hint">Wird nur lokal in deinem Browser gespeichert (localStorage), nicht hochgeladen. <a id="fundKeyDoc" href="${docLink}" target="_blank" rel="noopener">Key erhalten →</a></div>
       </div>`;
+    // Switch provider -> remember choice and refresh the form (updates doc link).
+    bar.querySelector('#fundProvider').addEventListener('change', (e) => {
+      ENRICH.setProvider(e.target.value);
+      renderFundBar();
+    });
     const save = () => {
+      ENRICH.setProvider(bar.querySelector('#fundProvider').value);
       const v = bar.querySelector('#fundKeyInput').value;
       if (v && v.trim()) {
         ENRICH.setApiKey(v);
@@ -748,11 +760,12 @@ function renderFundBar() {
   const vals = Object.values(STATE.fundamentals);
   const ok = vals.filter((f) => f && f.available).length;
 
+  const providerName = ENRICH.providerName();
   let statusHtml;
   if (!loaded) {
-    statusHtml = 'API-Key erkannt. Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).';
+    statusHtml = `API-Key erkannt (${escapeHtml(providerName)}). Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).`;
   } else if (ok > 0) {
-    statusHtml = `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: Financial Modeling Prep.`;
+    statusHtml = `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: ${escapeHtml(providerName)}.`;
   } else {
     // Nothing enriched -> show the most common failure reason to aid debugging.
     const reasons = vals.filter((f) => f && !f.available && f.reason).map((f) => f.reason);
@@ -862,7 +875,7 @@ function fundamentalsHtml(p, fund) {
       <div class="fund-head-text">
         <div class="fund-head-title">Fundamental-Score: ${interp.label}</div>
         <div class="fund-head-sum">${escapeHtml(f.summary)}</div>
-        <div class="fund-source">Quelle: ${escapeHtml(f.source)} · Symbol „${escapeHtml(f.fmpSymbol)}"</div>
+        <div class="fund-source">Quelle: ${escapeHtml(f.source)} · Symbol „${escapeHtml(f.providerSymbol || f.fmpSymbol || '')}"</div>
       </div>
     </div>
 

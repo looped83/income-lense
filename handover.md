@@ -199,20 +199,23 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
 **Financial Modeling Prep (FMP)**.
 
-- **Key-Handhabung:** Direktaufrufe an FMP mit API-Key. Der Key kommt aus dem
-  **In-App-Feld** im Detailanalyse-Tab (localStorage, `ENRICH.KEY_STORE`) oder ersatzweise
-  aus `config.js` (`fmpApiKey`); das In-App-Feld hat Vorrang. `ENRICH.enabled()` = Key
-  vorhanden; ohne Key bleibt alles CSV-only (V1). `fmpGet()` baut die Direkt-URL
-  (`…&apikey=`). Kein Proxy mehr (entfernt). ⚠️ In einer statischen App ist ein direkt
-  genutzter Key clientseitig sichtbar → Free-Tier-Key mit engen Limits verwenden.
-- **`enrichment.js`:** `fetchFundamentals(pos)` ruft über den Proxy
-  Dividenden-Historie, `ratios-ttm`, `cash-flow-statement`, `profile` ab und berechnet
-  Payout Ratio, FCF-Payout/-Coverage, Dividenden-Streak, DPS-Historie/-TTM, 5J-CAGR,
-  Rendite. `scoreFundamentals()` bildet daraus einen transparenten Score
-  (Sicherheit/Wachstum/Einkommen, Gewichte `ENRICH_WEIGHTS` 0,5/0,3/0,2).
-  Ticker-Mapping via `fmpSymbol()` (US direkt, EU mit Suffix `.DE`/`.L`/`.TO`/`.AS`/`.PA`).
-  Nur `securityType === 'EQUITY'` wird angereichert; Ergebnisse werden in `ENRICH.cache`
-  und `STATE.fundamentals` gecacht.
+- **Key-Handhabung:** Direktaufrufe mit API-Key. Anbieter + Key kommen aus dem
+  **In-App-Feld** (localStorage: `incomeLense.provider`, `incomeLense.<provider>Key`)
+  oder ersatzweise aus `config.js` (`provider`, `fmpApiKey`, `eodhdApiKey`); das In-App-Feld
+  hat Vorrang. `ENRICH.enabled()` = Key vorhanden; ohne Key bleibt alles CSV-only (V1).
+  Kein Proxy. ⚠️ In einer statischen App ist ein direkt genutzter Key clientseitig
+  sichtbar → Key mit engen Limits verwenden.
+- **`enrichment.js`:** Zwei Anbieter über `ENRICH.provider()` (`'fmp' | 'eodhd'`).
+  `fetchFundamentals(pos)` dispatcht zu `fetchFmp`/`fetchEodhd`.
+  - **FMP** (stable API): `stable/dividends`, `ratios-ttm`, `cash-flow-statement`,
+    `profile`, `quote`; Payout/Yield fallen bei gesperrtem Free-Tier auf Quote-EPS/Kurs
+    zurück (FCF dann `n/a`). Symbol via `fmpSymbol()` (US direkt, EU `.DE`/`.L`/…).
+  - **EODHD**: `fundamentals/{T.EX}` + `div/{T.EX}`; liefert Payout, Yield, EPS und
+    meist **FCF-Deckung** (aus `Financials.Cash_Flow.yearly`); Symbol via `eodhdSymbol()`
+    (`.US`/`.XETRA`/`.LSE`/`.TO`/`.AS`/`.PA`).
+  - Gemeinsam: `dividendSeries()` (DPS-Historie/-TTM, Streak, 5J-CAGR),
+    `scoreFundamentals()` (Sicherheit/Wachstum/Einkommen, `ENRICH_WEIGHTS` 0,5/0,3/0,2),
+    `finalizeFundamentals()`. Nur `EQUITY`; Ergebnisse in `ENRICH.cache`/`STATE.fundamentals`.
 - **`app.js`:** `renderFundBar()` (Button/Status), `loadAllFundamentals()` (Batch über
   alle aktiven Positionen, Concurrency 5, Fortschritt), `fundamentalsHtml()` +
   `buildDetailDpsChart()` (angereicherte Ansicht: Score-Shield, Blöcke, KPIs,

@@ -12,36 +12,72 @@
 
 const ENRICH = {
   cache: {}, // symbol -> result
-  KEY_STORE: 'incomeLense.fmpKey',
-  /** API key from the in-app field (localStorage) or, as fallback, config.js. */
-  apiKey() {
+  PROVIDERS: { fmp: 'Financial Modeling Prep', eodhd: 'EODHD' },
+  _ls(k) {
     try {
-      const k = localStorage.getItem(this.KEY_STORE);
-      if (k && k.trim()) return k.trim();
+      return localStorage.getItem(k);
     } catch (e) {
-      /* localStorage unavailable */
+      return null;
     }
-    const cfg = window.INCOME_LENSE_CONFIG || {};
-    return (cfg.fmpApiKey || '').trim();
   },
-  setApiKey(k) {
+  _set(k, v) {
     try {
-      localStorage.setItem(this.KEY_STORE, (k || '').trim());
+      localStorage.setItem(k, v);
     } catch (e) {
       /* ignore */
     }
+  },
+  _del(k) {
+    try {
+      localStorage.removeItem(k);
+    } catch (e) {
+      /* ignore */
+    }
+  },
+  /** Active provider: 'fmp' | 'eodhd'. */
+  provider() {
+    const p = this._ls('incomeLense.provider');
+    if (p === 'fmp' || p === 'eodhd') return p;
+    const cfg = window.INCOME_LENSE_CONFIG || {};
+    return cfg.provider === 'eodhd' ? 'eodhd' : 'fmp';
+  },
+  setProvider(p) {
+    if (p === 'fmp' || p === 'eodhd') this._set('incomeLense.provider', p);
+  },
+  /** API key for the active provider: in-app field (localStorage) or config.js. */
+  apiKey() {
+    const p = this.provider();
+    const k = this._ls(`incomeLense.${p}Key`);
+    if (k && k.trim()) return k.trim();
+    const cfg = window.INCOME_LENSE_CONFIG || {};
+    return ((p === 'eodhd' ? cfg.eodhdApiKey : cfg.fmpApiKey) || '').trim();
+  },
+  setApiKey(key) {
+    this._set(`incomeLense.${this.provider()}Key`, (key || '').trim());
   },
   clearApiKey() {
-    try {
-      localStorage.removeItem(this.KEY_STORE);
-    } catch (e) {
-      /* ignore */
-    }
+    this._del(`incomeLense.${this.provider()}Key`);
+  },
+  providerName() {
+    return this.PROVIDERS[this.provider()];
   },
   enabled() {
     return !!this.apiKey();
   },
 };
+
+/** Parse a possibly-string number; returns null when not finite. */
+function toNum(x) {
+  if (x === null || x === undefined || x === '') return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+/** Normalise a yield/ratio that may be given as a percent (e.g. 2.99 -> 0.0299). */
+function normFraction(x, pctThreshold) {
+  const n = toNum(x);
+  if (n === null) return null;
+  return n > pctThreshold ? n / 100 : n;
+}
 
 /** Weights of the fundamental composite score (easy to tune). */
 const ENRICH_WEIGHTS = { safety: 0.5, growth: 0.3, income: 0.2 };
@@ -56,6 +92,13 @@ function fmpSymbol(pos) {
   return sym;
 }
 
+/** Map a CSV position to an EODHD ticker (TICKER.EXCHANGE). */
+function eodhdSymbol(pos) {
+  const sym = (pos.symbol || '').trim();
+  const ex = { US: 'US', DE: 'XETRA', GB: 'LSE', CA: 'TO', NL: 'AS', FR: 'PA' }[pos.country] || 'US';
+  return `${sym}.${ex}`;
+}
+
 /** Only individual equities carry the fundamentals we model. */
 function isEnrichable(pos) {
   return (pos.securityType || '').toUpperCase() === 'EQUITY';
@@ -68,6 +111,17 @@ async function fmpGet(path) {
   if (!key) throw new Error('kein API-Key hinterlegt');
   const sep = path.includes('?') ? '&' : '?';
   const url = `https://financialmodelingprep.com/${path}${sep}apikey=${encodeURIComponent(key)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+/** GET an EODHD path directly using the stored API key. */
+async function eodhdGet(path) {
+  const key = ENRICH.apiKey();
+  if (!key) throw new Error('kein API-Key hinterlegt');
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `https://eodhd.com/api/${path}${sep}api_token=${encodeURIComponent(key)}&fmt=json`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -152,113 +206,97 @@ function fundamentalsSummary(f) {
 }
 
 /* ----------------------------------------------------------------------------
- * Derive metrics from raw FMP payloads.
+ * Shared helpers
  * --------------------------------------------------------------------------*/
-function computeFundamentals(pos, sym, raw) {
-  const out = { symbol: pos.symbol, fmpSymbol: sym, available: true, source: 'Financial Modeling Prep' };
-
-  // Dividend history -> annual DPS. stable returns an array; v3 used {historical}.
-  const hist = Array.isArray(raw.divs) ? raw.divs : (raw.divs && raw.divs.historical) || [];
+/** Build dpsByYear/dpsTTM/streak/cagr5 from a [{date, amount}] dividend history. */
+function dividendSeries(hist) {
   const byYear = {};
   hist.forEach((d) => {
     const y = parseInt(String(d.date).slice(0, 4), 10);
-    const v = num0(d.adjDividend != null ? d.adjDividend : d.dividend);
+    const v = num0(d.amount);
     if (Number.isFinite(y) && v > 0) byYear[y] = (byYear[y] || 0) + v;
   });
   const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
-  out.dpsByYear = years.map((y) => ({ year: y, dps: byYear[y] }));
+  const dpsByYear = years.map((y) => ({ year: y, dps: byYear[y] }));
 
-  // TTM dividend per share (sum of last ~12 months).
   const now = Date.now();
   const ttm = hist
     .filter((d) => now - new Date(d.date).getTime() <= 366 * 864e5)
-    .reduce((s, d) => s + num0(d.adjDividend != null ? d.adjDividend : d.dividend), 0);
-  out.dpsTTM = ttm > 0 ? ttm : null;
+    .reduce((s, d) => s + num0(d.amount), 0);
 
-  // Growth streak: consecutive year-over-year non-decreases among complete years.
   const curYear = new Date().getFullYear();
-  const full = out.dpsByYear.filter((d) => d.year < curYear);
+  const full = dpsByYear.filter((d) => d.year < curYear);
   let streak = 0;
   for (let i = full.length - 1; i > 0; i--) {
     if (full[i].dps >= full[i - 1].dps - 1e-9) streak++;
     else break;
   }
-  out.streak = full.length >= 2 ? streak : null;
-
-  // 5Y CAGR from complete years.
+  let cagr5 = null;
   if (full.length) {
     const latest = full[full.length - 1];
     const base = full.find((d) => d.year === latest.year - 5);
-    out.cagr5 = base && base.dps > 0 ? Math.pow(latest.dps / base.dps, 1 / 5) - 1 : null;
-  } else {
-    out.cagr5 = null;
+    cagr5 = base && base.dps > 0 ? Math.pow(latest.dps / base.dps, 1 / 5) - 1 : null;
   }
+  return { dpsByYear, dpsTTM: ttm > 0 ? ttm : null, streak: full.length >= 2 ? streak : null, cagr5 };
+}
 
-  // Ratios (TTM). Field names differ between FMP versions -> accept several.
-  const rt = Array.isArray(raw.ratios) && raw.ratios[0] ? raw.ratios[0] : null;
-  const pick = (o, keys) => {
-    if (!o) return null;
-    for (const k of keys) if (hasNum(o[k])) return o[k];
-    return null;
-  };
-  out.payoutRatio = pick(rt, ['payoutRatioTTM', 'dividendPayoutRatioTTM']);
-  out.dividendYield = pick(rt, ['dividendYieldTTM', 'dividendYielTTM']);
+/** First finite value among the given keys of an object, else null. */
+function pickNum(o, keys) {
+  if (!o) return null;
+  for (const k of keys) if (hasNum(o[k])) return o[k];
+  return null;
+}
 
-  // Cash flow -> FCF payout / coverage.
-  const cf = Array.isArray(raw.cf) && raw.cf[0] ? raw.cf[0] : null;
-  const fcf = pick(cf, ['freeCashFlow']);
-  const divPaidRaw = pick(cf, ['dividendsPaid', 'netDividendsPaid', 'commonDividendsPaid']);
-  if (hasNum(fcf) && hasNum(divPaidRaw) && fcf !== 0) {
-    const divPaid = Math.abs(divPaidRaw);
-    out.fcfPayout = divPaid / fcf;
-    out.fcfCoverage = divPaid > 0 ? fcf / divPaid : null;
-  } else {
-    out.fcfPayout = null;
-    out.fcfCoverage = null;
-  }
-
-  // Free-tier fallbacks from quote (EPS + price) — fills payout ratio & yield
-  // when the premium ratios/cash-flow endpoints are blocked.
-  const qt = Array.isArray(raw.quote) && raw.quote[0] ? raw.quote[0] : null;
-  const pf = Array.isArray(raw.profile) && raw.profile[0] ? raw.profile[0] : null;
-  const eps = pick(qt, ['eps']);
-  const price = pick(qt, ['price']) ?? pick(pf, ['price']);
-  const lastDiv = pick(pf, ['lastDividend', 'lastDiv']);
-
-  // Payout ratio = DPS(TTM) / EPS(TTM) when the ratios endpoint gave nothing.
-  if (out.payoutRatio == null && hasNum(out.dpsTTM) && hasNum(eps) && eps > 0) {
-    out.payoutRatio = out.dpsTTM / eps;
-    out.payoutRatioDerived = true;
-  }
-
-  // Yield: prefer FMP ratio, else DPS(TTM)/price, else last dividend/price, else CSV.
-  if (out.dividendYield == null && hasNum(out.dpsTTM) && hasNum(price) && price > 0) {
-    out.dividendYield = out.dpsTTM / price;
-  }
-  if (out.dividendYield == null && hasNum(lastDiv) && hasNum(price) && price > 0) {
-    out.dividendYield = lastDiv / price;
-  }
-  if (out.dividendYield == null && hasNum(pos.dividendYield)) out.dividendYield = pos.dividendYield;
-
+/** Attach the composite score + summary. */
+function finalizeFundamentals(out) {
   out.score = scoreFundamentals(out);
   out.summary = fundamentalsSummary(out);
   return out;
 }
 
-/** Fetch & compute fundamentals for one position (cached). */
-async function fetchFundamentals(pos) {
-  if (ENRICH.cache[pos.symbol]) return ENRICH.cache[pos.symbol];
-  if (!isEnrichable(pos)) {
-    const na = { symbol: pos.symbol, available: false, reason: 'Kein Einzelwert (ETF/Fonds/Krypto) – keine Fundamentaldaten.' };
-    ENRICH.cache[pos.symbol] = na;
-    return na;
+/* ----------------------------------------------------------------------------
+ * Provider: Financial Modeling Prep (stable API)
+ * --------------------------------------------------------------------------*/
+function computeFmp(pos, sym, raw) {
+  const out = { symbol: pos.symbol, providerSymbol: sym, available: true, source: ENRICH.PROVIDERS.fmp };
+  const hist = (Array.isArray(raw.divs) ? raw.divs : (raw.divs && raw.divs.historical) || []).map((d) => ({
+    date: d.date,
+    amount: d.adjDividend != null ? d.adjDividend : d.dividend,
+  }));
+  Object.assign(out, dividendSeries(hist));
+
+  const rt = Array.isArray(raw.ratios) && raw.ratios[0] ? raw.ratios[0] : null;
+  out.payoutRatio = pickNum(rt, ['payoutRatioTTM', 'dividendPayoutRatioTTM']);
+  out.dividendYield = pickNum(rt, ['dividendYieldTTM', 'dividendYielTTM']);
+
+  const cf = Array.isArray(raw.cf) && raw.cf[0] ? raw.cf[0] : null;
+  const fcf = pickNum(cf, ['freeCashFlow']);
+  const divPaidRaw = pickNum(cf, ['dividendsPaid', 'netDividendsPaid', 'commonDividendsPaid']);
+  if (hasNum(fcf) && hasNum(divPaidRaw) && fcf !== 0) {
+    const dp = Math.abs(divPaidRaw);
+    out.fcfPayout = dp / fcf;
+    out.fcfCoverage = dp > 0 ? fcf / dp : null;
+  } else {
+    out.fcfPayout = null;
+    out.fcfCoverage = null;
   }
+
+  // Free-tier fallbacks from quote (EPS + price).
+  const qt = Array.isArray(raw.quote) && raw.quote[0] ? raw.quote[0] : null;
+  const pf = Array.isArray(raw.profile) && raw.profile[0] ? raw.profile[0] : null;
+  const eps = pickNum(qt, ['eps']);
+  const price = pickNum(qt, ['price']) ?? pickNum(pf, ['price']);
+  const lastDiv = pickNum(pf, ['lastDividend', 'lastDiv']);
+  if (out.payoutRatio == null && hasNum(out.dpsTTM) && hasNum(eps) && eps > 0) out.payoutRatio = out.dpsTTM / eps;
+  if (out.dividendYield == null && hasNum(out.dpsTTM) && hasNum(price) && price > 0) out.dividendYield = out.dpsTTM / price;
+  if (out.dividendYield == null && hasNum(lastDiv) && hasNum(price) && price > 0) out.dividendYield = lastDiv / price;
+  if (out.dividendYield == null && hasNum(pos.dividendYield)) out.dividendYield = pos.dividendYield;
+
+  return finalizeFundamentals(out);
+}
+
+async function fetchFmp(pos) {
   const sym = fmpSymbol(pos);
-  // Use allSettled so we can surface the real failure reason (HTTP 401/403 vs.
-  // network/CORS) instead of silently swallowing it.
-  // FMP "stable" API (the legacy /api/v3 endpoints return 403 on current keys).
-  // quote is free and carries EPS + price, which let us derive the payout ratio
-  // and yield even when ratios/cash-flow are blocked on the free tier.
   const s = encodeURIComponent(sym);
   const settled = await Promise.allSettled([
     fmpGet(`stable/dividends?symbol=${s}`),
@@ -269,12 +307,8 @@ async function fetchFundamentals(pos) {
   ]);
   const [divs, ratios, cf, profile, quote] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
   const errs = settled.filter((r) => r.status === 'rejected').map((r) => (r.reason && r.reason.message) || 'Fehler');
-
-  // FMP error payloads can come back as 200 with an { "Error Message": ... } object.
   const errMsg = (x) => (x && !Array.isArray(x) && x['Error Message']) || null;
   const apiErr = errMsg(divs) || errMsg(profile) || errMsg(ratios) || errMsg(cf);
-
-  // stable/dividends returns an array directly (legacy v3 wrapped it in {historical}).
   const histLen = (Array.isArray(divs) && divs.length) || (divs && divs.historical && divs.historical.length) || 0;
   const hasAny = histLen || (Array.isArray(ratios) && ratios.length) || (Array.isArray(profile) && profile.length);
 
@@ -283,12 +317,95 @@ async function fetchFundamentals(pos) {
     if (apiErr) reason = `Anbieter-Fehler: ${apiErr}`;
     else if (errs.length) reason = `Abruf nicht möglich (${errs[0]}).`;
     else reason = `Keine Fundamentaldaten für „${sym}" gefunden.`;
-    const na = { symbol: pos.symbol, fmpSymbol: sym, available: false, reason };
+    return { symbol: pos.symbol, providerSymbol: sym, available: false, reason };
+  }
+  return computeFmp(pos, sym, { divs, ratios, cf, profile, quote });
+}
+
+/* ----------------------------------------------------------------------------
+ * Provider: EODHD (better international / ISIN coverage)
+ * --------------------------------------------------------------------------*/
+function computeEodhd(pos, sym, raw) {
+  const out = { symbol: pos.symbol, providerSymbol: sym, available: true, source: ENRICH.PROVIDERS.eodhd };
+  const hist = (Array.isArray(raw.divs) ? raw.divs : []).map((d) => ({
+    date: d.date,
+    amount: d.value != null ? d.value : d.unadjustedValue,
+  }));
+  Object.assign(out, dividendSeries(hist));
+
+  const fund = raw.fund || {};
+  const hl = fund.Highlights || {};
+  const sd = fund.SplitsDividends || {};
+
+  out.dividendYield = normFraction(hl.DividendYield, 1); // fraction or percent -> fraction
+  out.payoutRatio = normFraction(hl.PayoutRatio != null ? hl.PayoutRatio : sd.PayoutRatio, 2);
+  const eps = toNum(hl.EarningsShare);
+  if (out.payoutRatio == null && hasNum(out.dpsTTM) && hasNum(eps) && eps > 0) out.payoutRatio = out.dpsTTM / eps;
+
+  // FCF coverage from the latest yearly cash-flow statement (EODHD includes it).
+  out.fcfPayout = null;
+  out.fcfCoverage = null;
+  const cfy = fund.Financials && fund.Financials.Cash_Flow && fund.Financials.Cash_Flow.yearly;
+  if (cfy) {
+    const latest = Object.values(cfy).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    const fcf = latest && toNum(latest.freeCashFlow);
+    const dp = latest && toNum(latest.dividendsPaid);
+    if (hasNum(fcf) && hasNum(dp) && fcf !== 0) {
+      const a = Math.abs(dp);
+      out.fcfPayout = a / fcf;
+      out.fcfCoverage = a > 0 ? fcf / a : null;
+    }
+  }
+
+  // TTM dividend fallback from forward annual rate.
+  if (out.dpsTTM == null) {
+    const fwd = toNum(sd.ForwardAnnualDividendRate);
+    if (hasNum(fwd)) out.dpsTTM = fwd;
+  }
+  if (out.dividendYield == null && hasNum(pos.dividendYield)) out.dividendYield = pos.dividendYield;
+
+  return finalizeFundamentals(out);
+}
+
+async function fetchEodhd(pos) {
+  const sym = eodhdSymbol(pos);
+  const s = encodeURIComponent(sym);
+  const settled = await Promise.allSettled([
+    eodhdGet(`fundamentals/${s}`),
+    eodhdGet(`div/${s}?from=2010-01-01`),
+  ]);
+  const [fund, divs] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
+  const errs = settled.filter((r) => r.status === 'rejected').map((r) => (r.reason && r.reason.message) || 'Fehler');
+
+  // EODHD signals "not found" as a string body or an empty object.
+  const fundOk = fund && typeof fund === 'object' && (fund.Highlights || fund.SplitsDividends);
+  const histLen = Array.isArray(divs) ? divs.length : 0;
+  if (!fundOk && !histLen) {
+    let reason;
+    if (typeof fund === 'string') reason = `Anbieter-Fehler: ${fund}`;
+    else if (errs.length) reason = `Abruf nicht möglich (${errs[0]}).`;
+    else reason = `Keine Fundamentaldaten für „${sym}" gefunden.`;
+    return { symbol: pos.symbol, providerSymbol: sym, available: false, reason };
+  }
+  return computeEodhd(pos, sym, { fund, divs });
+}
+
+/* ----------------------------------------------------------------------------
+ * Fetch & compute fundamentals for one position (cached; provider dispatch).
+ * --------------------------------------------------------------------------*/
+async function fetchFundamentals(pos) {
+  if (ENRICH.cache[pos.symbol]) return ENRICH.cache[pos.symbol];
+  if (!isEnrichable(pos)) {
+    const na = { symbol: pos.symbol, available: false, reason: 'Kein Einzelwert (ETF/Fonds/Krypto) – keine Fundamentaldaten.' };
     ENRICH.cache[pos.symbol] = na;
     return na;
   }
-
-  const result = computeFundamentals(pos, sym, { divs, ratios, cf, profile, quote });
+  let result;
+  try {
+    result = ENRICH.provider() === 'eodhd' ? await fetchEodhd(pos) : await fetchFmp(pos);
+  } catch (e) {
+    result = { symbol: pos.symbol, available: false, reason: 'Abruf fehlgeschlagen (' + e.message + ').' };
+  }
   ENRICH.cache[pos.symbol] = result;
   return result;
 }

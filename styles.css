@@ -763,7 +763,8 @@ code {
 .fund-keyform { width: 100%; }
 .fund-key-label { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
 .fund-key-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.fund-key-row .ctrl { flex: 1; min-width: 220px; }
+.fund-key-row input.ctrl { flex: 1; min-width: 220px; }
+.fund-key-row select.ctrl { flex: 0 0 auto; }
 .fund-key-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
 .fund-key-hint a { color: var(--green); text-decoration: none; }
 .fund-key-hint a:hover { text-decoration: underline; }

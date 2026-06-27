@@ -16,7 +16,10 @@
  * Das In-App-Feld hat Vorrang vor diesem Wert.
  * ==========================================================================*/
 window.INCOME_LENSE_CONFIG = {
-  // Fest hinterlegter FMP-Key (auf der deployten Seite öffentlich sichtbar –
-  // bewusst gewählt). Bei Bedarf hier ersetzen.
+  // Standard-Anbieter, falls in der App keiner gewählt wurde: 'fmp' | 'eodhd'.
+  provider: 'fmp',
+  // Fest hinterlegte Keys (auf der deployten Seite öffentlich sichtbar –
+  // bewusst gewählt). Das In-App-Feld hat Vorrang.
   fmpApiKey: 'd11cfjRhaaFsbM08lb8LBiDmCDu6IuB6',
+  eodhdApiKey: '',
 };
