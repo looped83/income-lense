@@ -17,9 +17,9 @@
  * ==========================================================================*/
 window.INCOME_LENSE_CONFIG = {
   // Standard-Anbieter, falls in der App keiner gewählt wurde: 'fmp' | 'eodhd'.
-  provider: 'fmp',
+  provider: 'eodhd',
   // Fest hinterlegte Keys (auf der deployten Seite öffentlich sichtbar –
   // bewusst gewählt). Das In-App-Feld hat Vorrang.
   fmpApiKey: 'd11cfjRhaaFsbM08lb8LBiDmCDu6IuB6',
-  eodhdApiKey: '',
+  eodhdApiKey: '6a3f6719b0d076.68833415',
 };
