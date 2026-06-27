@@ -25,5 +25,5 @@
  * ==========================================================================*/
 window.INCOME_LENSE_CONFIG = {
   fmpProxyUrl: '',
-  fmpApiKey: '',
+  fmpApiKey: 'd11cfjRhaaFsbM08lb8LBiDmCDu6IuB6',
 };
