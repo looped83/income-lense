@@ -723,7 +723,7 @@ function renderFundBar() {
   if (!ENRICH.enabled()) {
     btn.classList.add('hidden');
     status.innerHTML =
-      'Fundamentaldaten (V2) inaktiv. In <code>config.js</code> eine Proxy-URL setzen, um Payout Ratio, FCF-Deckung, Dividenden-Streak und -Historie zu laden (siehe <code>proxy/README.md</code>).';
+      'Fundamentaldaten (V2) inaktiv. In <code>config.js</code> eine Proxy-URL (<code>fmpProxyUrl</code>) oder einen API-Key (<code>fmpApiKey</code>) setzen, um Payout Ratio, FCF-Deckung, Dividenden-Streak und -Historie zu laden.';
     return;
   }
 

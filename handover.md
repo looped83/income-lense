@@ -200,9 +200,13 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
 **Financial Modeling Prep (FMP)**.
 
-- **Sicherheit/Architektur:** Statische App → **Serverless-Proxy** (Cloudflare Worker in
-  `proxy/cloudflare-worker.js`) hält den FMP-Key als Secret. `config.js` enthält nur die
-  **Proxy-URL** (`fmpProxyUrl`), keinen Key. Ohne URL bleibt alles CSV-only (V1).
+- **Sicherheit/Architektur:** Zwei Modi (in `config.js`):
+  **Proxy** (`fmpProxyUrl`, empfohlen – Cloudflare Worker in `proxy/cloudflare-worker.js`
+  hält den FMP-Key als Secret) oder **Direkt-Key** (`fmpApiKey` – einfacher, aber der
+  Key ist clientseitig sichtbar; nur Key mit engen Limits, `config.js` möglichst
+  gitignoren). `ENRICH.mode()` → `'proxy' | 'direct' | 'off'` (Proxy hat Vorrang).
+  Ohne beides bleibt alles CSV-only (V1). `fmpGet()` baut entweder die Proxy- oder die
+  Direkt-URL (`…&apikey=`).
 - **`enrichment.js`:** `fetchFundamentals(pos)` ruft über den Proxy
   Dividenden-Historie, `ratios-ttm`, `cash-flow-statement`, `profile` ab und berechnet
   Payout Ratio, FCF-Payout/-Coverage, Dividenden-Streak, DPS-Historie/-TTM, 5J-CAGR,

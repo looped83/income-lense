@@ -16,8 +16,18 @@ const ENRICH = {
     const cfg = window.INCOME_LENSE_CONFIG || {};
     return (cfg.fmpProxyUrl || '').replace(/\/+$/, '');
   },
+  apiKey() {
+    const cfg = window.INCOME_LENSE_CONFIG || {};
+    return (cfg.fmpApiKey || '').trim();
+  },
+  /** 'proxy' | 'direct' | 'off' — proxy takes precedence when both are set. */
+  mode() {
+    if (this.proxyUrl()) return 'proxy';
+    if (this.apiKey()) return 'direct';
+    return 'off';
+  },
   enabled() {
-    return !!this.proxyUrl();
+    return this.mode() !== 'off';
   },
 };
 
@@ -39,11 +49,19 @@ function isEnrichable(pos) {
   return (pos.securityType || '').toUpperCase() === 'EQUITY';
 }
 
-/** GET a path on FMP via the proxy. `path` is the FMP path after "/api/". */
+/** GET a path on FMP, via the proxy if configured, otherwise directly with the key. */
 async function fmpGet(path) {
   const base = ENRICH.proxyUrl();
-  if (!base) throw new Error('kein Proxy konfiguriert');
-  const res = await fetch(`${base}?path=${encodeURIComponent(path)}`);
+  let url;
+  if (base) {
+    url = `${base}?path=${encodeURIComponent(path)}`;
+  } else {
+    const key = ENRICH.apiKey();
+    if (!key) throw new Error('kein Proxy/Key konfiguriert');
+    const sep = path.includes('?') ? '&' : '?';
+    url = `https://financialmodelingprep.com/api/${path}${sep}apikey=${encodeURIComponent(key)}`;
+  }
+  const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
