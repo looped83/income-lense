@@ -398,6 +398,32 @@ code {
 .topup-agg-amount { color: var(--green); font-weight: 700; font-size: 13px; white-space: nowrap; }
 .topup-agg-count { color: var(--text-faint); font-weight: 500; font-size: 11px; }
 
+/* --------------------------- Zieldepot 2033 ----------------------- */
+.target-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.target-label { font-size: 13px; color: var(--text-dim); }
+.target-btn {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.target-btn:hover { border-color: var(--border-strong); }
+.target-btn.active { border-color: var(--green); color: var(--green); background: var(--green-soft); }
+.target-custom { font-size: 13px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 6px; }
+.target-custom input { width: 120px; }
+
 /* ------------------------ Risk & concentration -------------------- */
 .risk-subtitle { font-size: 15px; font-weight: 700; margin: 26px 0 12px; }
 .risk-flags { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }

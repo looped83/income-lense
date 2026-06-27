@@ -23,7 +23,11 @@ const STATE = {
   kpis: null,
   charts: {}, // Chart.js instances (so we can destroy/rebuild)
   detailSelected: null, // currently selected symbol in the detail tab
+  targetMonthly: 3500, // Zieldepot 2033: net monthly dividend goal (€)
 };
+
+// Zieldepot 2033 configuration.
+const TARGET_YEAR = 2033;
 
 // CSV columns we read (kept for reference / documentation).
 const NUMERIC_FIELDS = [
@@ -49,6 +53,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // Top-up plan recomputes when the budget changes.
   const budget = document.getElementById('topupBudget');
   if (budget) budget.addEventListener('input', renderTopUp);
+
+  // Zieldepot 2033: target preset buttons + custom input.
+  document.querySelectorAll('.target-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      STATE.targetMonthly = parseInt(b.dataset.target, 10) || 3500;
+      const ci = document.getElementById('targetCustom');
+      if (ci) ci.value = '';
+      renderTarget();
+    });
+  });
+  const targetCustom = document.getElementById('targetCustom');
+  if (targetCustom)
+    targetCustom.addEventListener('input', () => {
+      const v = parseInt(targetCustom.value, 10);
+      if (Number.isFinite(v) && v > 0) {
+        STATE.targetMonthly = v;
+        renderTarget();
+      }
+    });
 
   setupNav();
 });
@@ -173,6 +196,7 @@ function handleParsedData(rows) {
   renderRisk();
   renderCalendar();
   renderIncome();
+  renderTarget();
   renderTable();
   renderDetailCards();
   renderActionIdeas();
@@ -1294,6 +1318,159 @@ function renderIncome() {
         <span class="cal-barwrap"><span class="cal-fill" style="width:${((y.value / maxYear) * 100).toFixed(1)}%"></span></span>
         <span class="cal-val">${fmtCurrency(y.value)}</span>
       </div>`
+    )
+    .join('');
+}
+
+/* ----------------------------------------------------------------------------
+ * Zieldepot 2033 — net dividend goal projection & per-position gap
+ * ----------------------------------------------------------------------------
+ * Projects each position's NET dividend to 2033 using its own dividend CAGR
+ * (organic only, no new money), compares the total to the monthly net goal, and
+ * shows what to do: a one-off lump sum and a monthly savings rate to close the
+ * gap. The gap is split per position weighted by the quality score. Everything
+ * is derived from the CSV (totalDividendRate, taxRate, dividendCagr, value).
+ * Simplified assumptions; no advice.
+ * --------------------------------------------------------------------------*/
+function clampG(g) {
+  // Use only non-negative, capped dividend growth for projections.
+  return hasNum(g) ? Math.max(0, Math.min(g, 0.15)) : 0;
+}
+
+function computeTarget() {
+  const active = STATE.active;
+  const years = Math.max(1, TARGET_YEAR - new Date().getFullYear());
+  const totalValue = STATE.ctx.totalValue;
+
+  // Per-position net dividend today and projected to 2033.
+  let currentNet = 0;
+  let projectedNet = 0;
+  const rows = active.map((p) => {
+    const taxRate = hasNum(p.taxRate) ? p.taxRate : 0;
+    const netNow = num0(p.totalDividendRate) * (1 - taxRate);
+    const g = clampG(p.dividendCagr);
+    const netProj = netNow * Math.pow(1 + g, years);
+    currentNet += netNow;
+    projectedNet += netProj;
+    // Net yield on the position (fallback handled later).
+    const yNet = hasNum(p.dividendYield) && p.dividendYield > 0 ? p.dividendYield * (1 - taxRate) : null;
+    return { p, netNow, netProj, g, yNet };
+  });
+
+  // Income-weighted average dividend CAGR (for new-money growth).
+  let wSum = 0;
+  let wWeight = 0;
+  active.forEach((p) => {
+    const t = num0(p.totalDividendRate);
+    if (t > 0 && hasNum(p.dividendCagr)) {
+      wSum += t * p.dividendCagr;
+      wWeight += t;
+    }
+  });
+  const gAvg = Math.max(0, Math.min(wWeight > 0 ? wSum / wWeight : 0, 0.12));
+
+  // Portfolio net yield (net dividend / value).
+  const yPort = totalValue > 0 ? currentNet / totalValue : 0;
+
+  const targetAnnual = STATE.targetMonthly * 12;
+  const gap = Math.max(0, targetAnnual - projectedNet);
+  const growth = Math.pow(1 + gAvg, years);
+
+  // Split the missing net dividend across dividend payers, weighted by quality
+  // score, and compute the additional capital per position from its own net
+  // yield & growth. The headline lump sum is the sum of these (so the rows add
+  // up); the monthly savings rate is derived from the lump via growth.
+  const payers = rows.filter((r) => r.netNow > 0);
+  const scoreSum = payers.reduce((s, r) => s + r.p.scores.total, 0);
+  let lump = 0;
+  rows.forEach((r) => {
+    r.share = 0;
+    r.addCapital = 0;
+  });
+  if (gap > 0 && scoreSum > 0) {
+    payers.forEach((r) => {
+      r.share = gap * (r.p.scores.total / scoreSum); // missing net dividend p.a.
+      const yUse = r.yNet && r.yNet > 0 ? r.yNet : yPort;
+      r.addCapital = yUse > 0 ? r.share / (yUse * Math.pow(1 + r.g, years)) : 0;
+      lump += r.addCapital;
+    });
+  }
+
+  const i = gAvg / 12;
+  const n = years * 12;
+  const annuityFactor = i > 1e-9 ? (Math.pow(1 + i, n) - 1) / i : n; // FV of 1/month
+  // Monthly savings whose future value (grown at gAvg) equals the lump grown at gAvg.
+  const monthly = lump > 0 && annuityFactor > 0 ? (lump * growth) / annuityFactor : 0;
+
+  return { years, rows, payers, currentNet, projectedNet, gAvg, yPort, targetAnnual, gap, lump, monthly };
+}
+
+function renderTarget() {
+  if (!STATE.active.length) return;
+  const t = computeTarget();
+  const reached = t.gap <= 0;
+  const projMonthly = t.projectedNet / 12;
+  const diffMonthly = Math.max(0, STATE.targetMonthly - projMonthly);
+
+  // Highlight the active preset button.
+  document.querySelectorAll('.target-btn').forEach((b) => {
+    b.classList.toggle('active', parseInt(b.dataset.target, 10) === STATE.targetMonthly);
+  });
+
+  // Summary line (with realistic-goal hint).
+  const summary = document.getElementById('targetSummary');
+  if (reached) {
+    summary.innerHTML = `✅ Dein projiziertes Netto-Einkommen 2033 (${fmtCurrency(projMonthly)}/Monat) erreicht das Ziel von ${fmtCurrency(STATE.targetMonthly)}/Monat bereits.`;
+  } else {
+    let hint = '';
+    if (STATE.targetMonthly >= 3500 && t.lump > STATE.kpis.totalValue * 1.5) {
+      hint = ' Das 3.500-€-Ziel ist ambitioniert – über den Button „2.000 €" siehst du eine realistischere Variante.';
+    }
+    summary.innerHTML =
+      `Bis ${t.years} Jahre bis 2033. Zum Ziel fehlen aktuell <strong>${fmtCurrency(diffMonthly)}/Monat</strong> ` +
+      `(${fmtCurrency(t.gap)} netto p.a.).${hint}`;
+  }
+
+  const cards = [
+    { label: 'Netto-Dividende heute', value: `${fmtCurrency(STATE.kpis ? t.currentNet / 12 : 0)} /Mon`, sub: `${fmtCurrency(t.currentNet)} p.a.` },
+    { label: 'Projektion 2033 (netto)', value: `${fmtCurrency(projMonthly)} /Mon`, sub: `${fmtCurrency(t.projectedNet)} p.a. · organisch`, accent: 'income' },
+    { label: 'Monatsziel (netto)', value: `${fmtCurrency(STATE.targetMonthly)} /Mon`, sub: `${fmtCurrency(t.targetAnnual)} p.a.` },
+    { label: 'Differenz zum Ziel', value: reached ? 'Ziel erreicht' : `${fmtCurrency(diffMonthly)} /Mon`, accent: reached ? 'pos' : 'neg' },
+    { label: 'Benötigter Einmalbetrag', value: fmtCurrency(t.lump), sub: 'heute investiert (bis 2033)' },
+    { label: 'Benötigte Sparrate', value: `${fmtCurrency(t.monthly)} /Mon`, sub: `bis 2033 (${t.years} J.)` },
+    { label: 'Ø Dividenden-Wachstum', value: fmtPercent(t.gAvg, 1), sub: 'einkommensgewichtet p.a.' },
+    { label: 'Netto-Rendite (Basis)', value: fmtPercent(t.yPort, 2), sub: 'für Kapitalbedarf' },
+  ];
+  document.getElementById('targetKpis').innerHTML = cards
+    .map(
+      (c) => `<div class="kpi-card kpi-${c.accent || 'neutral'}"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
+    )
+    .join('');
+
+  // Per-position gap split by quality score (dividend payers only).
+  const tbody = document.getElementById('targetBody');
+  const countEl = document.getElementById('targetCount');
+  if (reached) {
+    countEl.textContent = '';
+    tbody.innerHTML = '<tr><td colspan="7" class="conc-empty">Ziel bereits erreicht – kein zusätzlicher Kapitalbedarf.</td></tr>';
+    return;
+  }
+
+  const ranked = [...t.payers].sort((a, b) => b.p.scores.total - a.p.scores.total);
+
+  countEl.textContent = `Verteilung von ${fmtCurrency(t.gap)} fehlender Netto-Dividende p.a. auf ${t.payers.length} Dividendenzahler (nach Score). Summe Zusatz-Kapital = ${fmtCurrency(t.lump)}.`;
+  tbody.innerHTML = ranked
+    .map(
+      (r) => `
+      <tr>
+        <td class="t-sym">${escapeHtml(r.p.symbol)}</td>
+        <td class="t-name" title="${escapeHtml(r.p.name)}">${escapeHtml(r.p.name)}</td>
+        <td class="t-num">${fmtCurrency(r.netNow)}</td>
+        <td class="t-num">${fmtCurrency(r.netProj)}</td>
+        <td class="t-num">${fmtCurrency(r.share)}</td>
+        <td class="t-num"><strong>${fmtCurrency(r.addCapital)}</strong></td>
+        <td class="t-num">${r.p.scores.total}</td>
+      </tr>`
     )
     .join('');
 }

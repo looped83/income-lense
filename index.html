@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=25" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -37,6 +37,7 @@
       <button type="button" class="nav-item" data-view="view-charts">Allokation</button>
       <button type="button" class="nav-item" data-view="view-risk">Risiko</button>
       <button type="button" class="nav-item" data-view="view-income">Einkommensprognose</button>
+      <button type="button" class="nav-item" data-view="view-target">Zieldepot 2033</button>
       <button type="button" class="nav-item" data-view="view-calendar">Dividendenkalender</button>
       <button type="button" class="nav-item" data-view="view-topup">Aufstockplan</button>
       <button type="button" class="nav-item" data-view="view-actions">Einordnung</button>
@@ -207,6 +208,46 @@
         </div>
       </section>
 
+      <!-- TARGET PORTFOLIO 2033 -->
+      <section class="block view" id="view-target">
+        <h2 class="block-title">Zieldepot 2033</h2>
+        <p class="block-note">
+          Projektion deiner <strong>Netto</strong>-Dividende bis 2033 – nur aus dem
+          Dividendenwachstum deiner bestehenden Werte, ohne neue Käufe – im Vergleich zu deinem
+          Monatsziel. „Was fehlt" wird nach Qualitäts-Score auf die Werte verteilt. Vereinfachte
+          Annahmen, <strong>keine Anlageberatung.</strong>
+        </p>
+        <div class="target-controls">
+          <span class="target-label">Monatsziel (netto):</span>
+          <button type="button" class="target-btn" data-target="3500">3.500 €</button>
+          <button type="button" class="target-btn" data-target="2000">2.000 €</button>
+          <label class="target-custom">eigenes:
+            <input type="number" id="targetCustom" class="ctrl" min="0" step="100" placeholder="€/Monat" />
+          </label>
+        </div>
+        <div id="targetSummary" class="block-note"></div>
+        <div id="targetKpis" class="kpi-grid"></div>
+
+        <h3 class="risk-subtitle">Was pro Wert fehlt (Aufteilung nach Score)</h3>
+        <div class="table-count" id="targetCount"></div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Name</th>
+                <th class="t-num">Netto-Div. p.a. heute</th>
+                <th class="t-num">Projektion 2033</th>
+                <th class="t-num">Zusatz-Div. nötig p.a.</th>
+                <th class="t-num">Zusatz-Kapital</th>
+                <th class="t-num">Score</th>
+              </tr>
+            </thead>
+            <tbody id="targetBody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ACTION IDEAS -->
       <section class="block view" id="view-actions">
         <h2 class="block-title">Einordnung der Werte</h2>
@@ -327,9 +368,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=24"></script>
-  <script src="scoring.js?v=24"></script>
-  <script src="insights.js?v=24"></script>
-  <script src="app.js?v=24"></script>
+  <script src="formatting.js?v=25"></script>
+  <script src="scoring.js?v=25"></script>
+  <script src="insights.js?v=25"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>

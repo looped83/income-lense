@@ -84,6 +84,7 @@ Sticky Tab-Leiste; es ist immer **genau eine** Ansicht sichtbar
 | 3 | Allokation | `view-charts` | `renderCharts` | 7 Chart.js-Diagramme (Sektor/Land/Art/Währung, Top-10 Wert, Top-10 Dividende, Div.-Beitrag/Sektor) |
 | 4 | Risiko | `view-risk` | `renderRisk` | Konzentrationskennzahlen + Warnungen (s. §6) |
 | 5 | Einkommensprognose | `view-income` | `renderIncome` | Brutto/Netto, Steuer, Netto-Rendite/YoC, Monatsbalken, 5-Jahres-Hochrechnung |
+| – | Zieldepot 2033 | `view-target` | `renderTarget` | Netto-Projektion bis 2033 vs. Monatsziel; Einmalbetrag + Sparrate; Lücke pro Wert nach Score (`computeTarget`, `TARGET_YEAR`) |
 | 6 | Dividendenkalender | `view-calendar` | `renderCalendar` | Monatsverteilung + kommende Termine |
 | 7 | Aufstockplan | `view-topup` | `renderTopUp` | 1.000-€-Tranchen-Plan (s. §8) |
 | 8 | Einordnung | `view-actions` | `renderActionIdeas` | Gruppierung aller Werte in Aktionskategorien |
