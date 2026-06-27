@@ -745,13 +745,29 @@ function renderFundBar() {
 
   // Key present -> status + load/refresh + change-key.
   const loaded = STATE.fundLoaded;
-  const ok = Object.values(STATE.fundamentals).filter((f) => f && f.available).length;
+  const vals = Object.values(STATE.fundamentals);
+  const ok = vals.filter((f) => f && f.available).length;
+
+  let statusHtml;
+  if (!loaded) {
+    statusHtml = 'API-Key erkannt. Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).';
+  } else if (ok > 0) {
+    statusHtml = `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: Financial Modeling Prep.`;
+  } else {
+    // Nothing enriched -> show the most common failure reason to aid debugging.
+    const reasons = vals.filter((f) => f && !f.available && f.reason).map((f) => f.reason);
+    const counts = {};
+    reasons.forEach((r) => (counts[r] = (counts[r] || 0) + 1));
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    const sample = top ? top[0] : 'unbekannter Grund';
+    statusHtml =
+      `<strong>0 Werte angereichert.</strong> Häufigster Grund: „${escapeHtml(sample)}". ` +
+      'Hinweis: <code>HTTP 401</code> → Key ungültig/deaktiviert · <code>HTTP 403</code> → Endpoint nicht im FMP-Plan · ' +
+      '„Failed to fetch" → CORS/Netzwerk (dann ist ein Proxy nötig). Mehr Details: Browser-Konsole (F12).';
+  }
+
   bar.innerHTML = `
-    <div class="fund-status" id="fundStatus">${
-      loaded
-        ? `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: Financial Modeling Prep.`
-        : 'API-Key erkannt. Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).'
-    }</div>
+    <div class="fund-status" id="fundStatus">${statusHtml}</div>
     <div class="fund-actions">
       <button type="button" class="fund-btn" id="fundLoadBtn">${loaded ? 'Aktualisieren' : 'Fundamentaldaten laden (alle Positionen)'}</button>
       <button type="button" class="fund-link" id="fundKeyChange">API-Key ändern</button>
@@ -793,6 +809,12 @@ async function loadAllFundamentals() {
     await Promise.all(Array.from({ length: concurrency }, worker));
   } finally {
     STATE.fundLoaded = true;
+    // Console summary to make failures easy to read (F12).
+    const vals = Object.values(STATE.fundamentals);
+    const ok = vals.filter((f) => f && f.available).length;
+    const reasons = {};
+    vals.filter((f) => f && !f.available).forEach((f) => (reasons[f.reason] = (reasons[f.reason] || 0) + 1));
+    console.log(`[Income Lense] Fundamentaldaten: ${ok}/${vals.length} angereichert.`, reasons);
     renderFundBar();
     renderDetailList();
     if (STATE.detailSelected) selectDetail(STATE.detailSelected);

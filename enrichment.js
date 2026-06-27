@@ -231,23 +231,35 @@ async function fetchFundamentals(pos) {
     return na;
   }
   const sym = fmpSymbol(pos);
-  try {
-    const [divs, ratios, cf, profile] = await Promise.all([
-      fmpGet(`v3/historical-price-full/stock_dividend/${sym}`).catch(() => null),
-      fmpGet(`v3/ratios-ttm/${sym}`).catch(() => null),
-      fmpGet(`v3/cash-flow-statement/${sym}?period=annual&limit=1`).catch(() => null),
-      fmpGet(`v3/profile/${sym}`).catch(() => null),
-    ]);
-    const hasAny = (divs && divs.historical && divs.historical.length) || (ratios && ratios.length) || (profile && profile.length);
-    if (!hasAny) {
-      const na = { symbol: pos.symbol, available: false, reason: `Keine Fundamentaldaten für „${sym}" beim Anbieter gefunden.` };
-      ENRICH.cache[pos.symbol] = na;
-      return na;
-    }
-    const result = computeFundamentals(pos, sym, { divs, ratios, cf, profile });
-    ENRICH.cache[pos.symbol] = result;
-    return result;
-  } catch (e) {
-    return { symbol: pos.symbol, available: false, reason: 'Abruf fehlgeschlagen (' + e.message + ').' };
+  // Use allSettled so we can surface the real failure reason (HTTP 401/403 vs.
+  // network/CORS) instead of silently swallowing it.
+  const settled = await Promise.allSettled([
+    fmpGet(`v3/historical-price-full/stock_dividend/${sym}`),
+    fmpGet(`v3/ratios-ttm/${sym}`),
+    fmpGet(`v3/cash-flow-statement/${sym}?period=annual&limit=1`),
+    fmpGet(`v3/profile/${sym}`),
+  ]);
+  const [divs, ratios, cf, profile] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
+  const errs = settled.filter((r) => r.status === 'rejected').map((r) => (r.reason && r.reason.message) || 'Fehler');
+
+  // FMP error payloads come back as 200 with an { "Error Message": ... } object.
+  const apiErr =
+    (divs && divs['Error Message']) || (profile && profile['Error Message']) || (ratios && ratios['Error Message']);
+
+  const hasAny =
+    (divs && divs.historical && divs.historical.length) || (ratios && ratios.length) || (profile && profile.length);
+
+  if (!hasAny) {
+    let reason;
+    if (apiErr) reason = `Anbieter-Fehler: ${apiErr}`;
+    else if (errs.length) reason = `Abruf nicht möglich (${errs[0]}).`;
+    else reason = `Keine Fundamentaldaten für „${sym}" gefunden.`;
+    const na = { symbol: pos.symbol, fmpSymbol: sym, available: false, reason };
+    ENRICH.cache[pos.symbol] = na;
+    return na;
   }
+
+  const result = computeFundamentals(pos, sym, { divs, ratios, cf, profile });
+  ENRICH.cache[pos.symbol] = result;
+  return result;
 }
