@@ -735,6 +735,113 @@ code {
 .dc-insights ul { margin: 0; padding-left: 18px; }
 .dc-insights li { font-size: 12.5px; margin: 5px 0; color: var(--text); }
 
+/* ------------------- V2: fundamentals (Detailanalyse) ------------- */
+.fund-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.fund-status { font-size: 12.5px; color: var(--text-dim); flex: 1; min-width: 240px; }
+.fund-btn {
+  background: var(--green);
+  color: #06231a;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.12s ease;
+}
+.fund-btn:hover { filter: brightness(1.05); }
+.fund-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* fundamentals badge in the position list */
+.dli-fund {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue);
+  background: rgba(52, 152, 219, 0.16);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.fund-na {
+  margin-top: 16px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.fund-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.fund-header { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
+.fund-shield {
+  flex: 0 0 auto;
+  width: 76px;
+  height: 76px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+}
+.fund-shield-num { font-size: 28px; font-weight: 800; line-height: 1; }
+.fund-shield-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin-top: 3px; }
+.fund-shield.score-excellent .fund-shield-num { color: var(--green); }
+.fund-shield.score-good .fund-shield-num { color: #6fb9ec; }
+.fund-shield.score-ok .fund-shield-num { color: #58c9ab; }
+.fund-shield.score-weak .fund-shield-num { color: var(--orange); }
+.fund-shield.score-critical .fund-shield-num { color: var(--red); }
+.fund-head-title { font-weight: 700; font-size: 14px; }
+.fund-head-sum { color: var(--text-dim); font-size: 12.5px; margin-top: 4px; }
+.fund-source { color: var(--text-faint); font-size: 11px; margin-top: 6px; }
+
+.fund-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.fund-block { background: var(--bg-elev-2); border-radius: var(--radius-sm); padding: 14px; }
+.fund-block-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.fund-block-score { font-size: 22px; font-weight: 800; }
+.fund-block-label { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.fund-sub { margin-bottom: 9px; }
+.fund-sub:last-child { margin-bottom: 0; }
+.fund-sub-top { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+.fund-sub-val { color: var(--text); font-weight: 600; }
+
+.fund-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.fund-kpi { background: var(--bg-elev-2); border-radius: var(--radius-sm); padding: 10px 12px; }
+.fund-kpi-l { font-size: 11px; color: var(--text-dim); }
+.fund-kpi-v { font-size: 16px; font-weight: 700; margin-top: 3px; }
+.fund-chart-title { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+.fund-chart-wrap { position: relative; height: 200px; }
+
 /* ----------------------------- Footer ----------------------------- */
 .app-footer {
   border-top: 1px solid var(--border);
