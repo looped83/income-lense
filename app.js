@@ -773,10 +773,14 @@ function renderFundBar() {
     reasons.forEach((r) => (counts[r] = (counts[r] || 0) + 1));
     const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
     const sample = top ? top[0] : 'unbekannter Grund';
+    const corsHint =
+      ENRICH.provider() === 'eodhd'
+        ? '„Load failed"/„Failed to fetch" → EODHD blockiert direkte Browser-Aufrufe (CORS); dafür ist ein Proxy nötig oder nutze FMP.'
+        : '„Failed to fetch" → CORS/Netzwerk.';
     statusHtml =
       `<strong>0 Werte angereichert.</strong> Häufigster Grund: „${escapeHtml(sample)}". ` +
-      'Hinweis: <code>HTTP 401</code> → Key ungültig/deaktiviert · <code>HTTP 403</code> → Endpoint nicht im FMP-Plan · ' +
-      '„Failed to fetch" → CORS/Netzwerk (dann ist ein Proxy nötig). Mehr Details: Browser-Konsole (F12).';
+      `Hinweis: <code>HTTP 401</code> → Key ungültig/deaktiviert · <code>HTTP 403</code> → Endpoint nicht im Plan · ${corsHint} ` +
+      'Mehr Details: Browser-Konsole (F12).';
   }
 
   bar.innerHTML = `
