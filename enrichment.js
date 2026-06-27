@@ -61,12 +61,13 @@ function isEnrichable(pos) {
   return (pos.securityType || '').toUpperCase() === 'EQUITY';
 }
 
-/** GET a path on FMP directly using the stored API key. */
+/** GET an FMP path directly using the stored API key. `path` is everything
+ *  after the domain, e.g. "stable/dividends?symbol=KO". */
 async function fmpGet(path) {
   const key = ENRICH.apiKey();
   if (!key) throw new Error('kein API-Key hinterlegt');
   const sep = path.includes('?') ? '&' : '?';
-  const url = `https://financialmodelingprep.com/api/${path}${sep}apikey=${encodeURIComponent(key)}`;
+  const url = `https://financialmodelingprep.com/${path}${sep}apikey=${encodeURIComponent(key)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -156,8 +157,8 @@ function fundamentalsSummary(f) {
 function computeFundamentals(pos, sym, raw) {
   const out = { symbol: pos.symbol, fmpSymbol: sym, available: true, source: 'Financial Modeling Prep' };
 
-  // Dividend history -> annual DPS.
-  const hist = (raw.divs && raw.divs.historical) || [];
+  // Dividend history -> annual DPS. stable returns an array; v3 used {historical}.
+  const hist = Array.isArray(raw.divs) ? raw.divs : (raw.divs && raw.divs.historical) || [];
   const byYear = {};
   hist.forEach((d) => {
     const y = parseInt(String(d.date).slice(0, 4), 10);
@@ -193,26 +194,35 @@ function computeFundamentals(pos, sym, raw) {
     out.cagr5 = null;
   }
 
-  // Ratios (TTM).
-  const rt = raw.ratios && raw.ratios[0] ? raw.ratios[0] : null;
-  out.payoutRatio = rt && hasNum(rt.payoutRatioTTM) ? rt.payoutRatioTTM : null;
-  out.dividendYield = rt && hasNum(rt.dividendYielTTM) ? rt.dividendYielTTM : null;
+  // Ratios (TTM). Field names differ between FMP versions -> accept several.
+  const rt = Array.isArray(raw.ratios) && raw.ratios[0] ? raw.ratios[0] : null;
+  const pick = (o, keys) => {
+    if (!o) return null;
+    for (const k of keys) if (hasNum(o[k])) return o[k];
+    return null;
+  };
+  out.payoutRatio = pick(rt, ['payoutRatioTTM', 'dividendPayoutRatioTTM']);
+  out.dividendYield = pick(rt, ['dividendYieldTTM', 'dividendYielTTM']);
 
   // Cash flow -> FCF payout / coverage.
-  const cf = raw.cf && raw.cf[0] ? raw.cf[0] : null;
-  if (cf && hasNum(cf.freeCashFlow) && hasNum(cf.dividendsPaid) && cf.freeCashFlow !== 0) {
-    const divPaid = Math.abs(cf.dividendsPaid);
-    out.fcfPayout = divPaid / cf.freeCashFlow;
-    out.fcfCoverage = divPaid > 0 ? cf.freeCashFlow / divPaid : null;
+  const cf = Array.isArray(raw.cf) && raw.cf[0] ? raw.cf[0] : null;
+  const fcf = pick(cf, ['freeCashFlow']);
+  const divPaidRaw = pick(cf, ['dividendsPaid', 'netDividendsPaid', 'commonDividendsPaid']);
+  if (hasNum(fcf) && hasNum(divPaidRaw) && fcf !== 0) {
+    const divPaid = Math.abs(divPaidRaw);
+    out.fcfPayout = divPaid / fcf;
+    out.fcfCoverage = divPaid > 0 ? fcf / divPaid : null;
   } else {
     out.fcfPayout = null;
     out.fcfCoverage = null;
   }
 
-  // Yield fallback from profile (lastDiv / price).
-  const pf = raw.profile && raw.profile[0] ? raw.profile[0] : null;
-  if (out.dividendYield == null && pf && hasNum(pf.lastDiv) && hasNum(pf.price) && pf.price > 0) {
-    out.dividendYield = pf.lastDiv / pf.price;
+  // Yield fallback from profile (last dividend / price).
+  const pf = Array.isArray(raw.profile) && raw.profile[0] ? raw.profile[0] : null;
+  const lastDiv = pick(pf, ['lastDividend', 'lastDiv']);
+  const price = pick(pf, ['price']);
+  if (out.dividendYield == null && hasNum(lastDiv) && hasNum(price) && price > 0) {
+    out.dividendYield = lastDiv / price;
   }
   // Fall back to the CSV yield if FMP has none.
   if (out.dividendYield == null && hasNum(pos.dividendYield)) out.dividendYield = pos.dividendYield;
@@ -233,21 +243,24 @@ async function fetchFundamentals(pos) {
   const sym = fmpSymbol(pos);
   // Use allSettled so we can surface the real failure reason (HTTP 401/403 vs.
   // network/CORS) instead of silently swallowing it.
+  // FMP "stable" API (the legacy /api/v3 endpoints return 403 on current keys).
+  const s = encodeURIComponent(sym);
   const settled = await Promise.allSettled([
-    fmpGet(`v3/historical-price-full/stock_dividend/${sym}`),
-    fmpGet(`v3/ratios-ttm/${sym}`),
-    fmpGet(`v3/cash-flow-statement/${sym}?period=annual&limit=1`),
-    fmpGet(`v3/profile/${sym}`),
+    fmpGet(`stable/dividends?symbol=${s}`),
+    fmpGet(`stable/ratios-ttm?symbol=${s}`),
+    fmpGet(`stable/cash-flow-statement?symbol=${s}&limit=1`),
+    fmpGet(`stable/profile?symbol=${s}`),
   ]);
   const [divs, ratios, cf, profile] = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
   const errs = settled.filter((r) => r.status === 'rejected').map((r) => (r.reason && r.reason.message) || 'Fehler');
 
-  // FMP error payloads come back as 200 with an { "Error Message": ... } object.
-  const apiErr =
-    (divs && divs['Error Message']) || (profile && profile['Error Message']) || (ratios && ratios['Error Message']);
+  // FMP error payloads can come back as 200 with an { "Error Message": ... } object.
+  const errMsg = (x) => (x && !Array.isArray(x) && x['Error Message']) || null;
+  const apiErr = errMsg(divs) || errMsg(profile) || errMsg(ratios) || errMsg(cf);
 
-  const hasAny =
-    (divs && divs.historical && divs.historical.length) || (ratios && ratios.length) || (profile && profile.length);
+  // stable/dividends returns an array directly (legacy v3 wrapped it in {historical}).
+  const histLen = (Array.isArray(divs) && divs.length) || (divs && divs.historical && divs.historical.length) || 0;
+  const hasAny = histLen || (Array.isArray(ratios) && ratios.length) || (Array.isArray(profile) && profile.length);
 
   if (!hasAny) {
     let reason;
