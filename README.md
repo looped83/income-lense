@@ -114,10 +114,17 @@ weiterhin u. a. Verschuldungsmetriken und Analystenratings.
 
 ### Einrichtung der V2-Anreicherung
 
+**Option A – Proxy (empfohlen, Key bleibt geheim):**
 1. Proxy deployen (Cloudflare Worker o. Ä.) – siehe [`proxy/README.md`](proxy/README.md);
    FMP-API-Key dort als Secret hinterlegen.
 2. In `config.js` die Proxy-URL eintragen (`fmpProxyUrl`).
 3. Im Tab **Detailanalyse** auf „Fundamentaldaten laden (alle Positionen)" klicken.
+
+**Option B – Key direkt in `config.js` (`fmpApiKey`):**
+Einfacher, aber ⚠️ der Key ist clientseitig sichtbar (View-Source/Network), sobald die
+Seite deployed oder `config.js` in ein öffentliches Repo committet wird. Nur mit einem
+Key mit engen Limits nutzen und `config.js` möglichst per `.gitignore` aus dem Repo halten.
+Ist beides gesetzt, hat der Proxy Vorrang.
 
 Alternative Anbieter (z. B. [EODHD](https://eodhd.com/) für ISIN/EU-Abdeckung,
 [Alpha Vantage](https://www.alphavantage.co/)) lassen sich über `enrichment.js` + Proxy
