@@ -22,10 +22,7 @@ const STATE = {
   ctx: null, // portfolio context for scoring
   kpis: null,
   charts: {}, // Chart.js instances (so we can destroy/rebuild)
-  fundamentals: {}, // symbol -> external fundamentals (V2)
-  fundLoaded: false, // whether the batch load has run
   detailSelected: null, // currently selected symbol in the detail tab
-  detailChart: null, // Chart.js instance for the detail fundamentals chart
 };
 
 // CSV columns we read (kept for reference / documentation).
@@ -53,8 +50,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const budget = document.getElementById('topupBudget');
   if (budget) budget.addEventListener('input', renderTopUp);
 
-  // V2 fundamentals controls are wired dynamically in renderFundBar().
-
   setupNav();
 });
 
@@ -81,11 +76,6 @@ function showView(viewId) {
   if (viewId === 'view-charts') {
     Object.values(STATE.charts).forEach((c) => c && c.resize());
   }
-  // Re-render the selected detail so its fundamentals chart sizes correctly.
-  if (viewId === 'view-details' && STATE.detailSelected) {
-    selectDetail(STATE.detailSelected);
-  }
-
   // Jump back to the top so each "page" starts at its heading.
   window.scrollTo({ top: 0, behavior: 'auto' });
 }
@@ -160,11 +150,6 @@ function handleParsedData(rows) {
   STATE.active = positions.filter((p) => p.isActive);
   STATE.inactive = positions.filter((p) => !p.isActive);
 
-  // Reset any V2 fundamentals from a previous CSV.
-  STATE.fundamentals = {};
-  STATE.fundLoaded = false;
-  ENRICH.cache = {};
-
   // Build portfolio context + KPIs from the ACTIVE positions only.
   STATE.ctx = buildContext(STATE.active);
   STATE.kpis = computeKpis(STATE.active);
@@ -190,7 +175,6 @@ function handleParsedData(rows) {
   renderIncome();
   renderTable();
   renderDetailCards();
-  renderFundBar();
   renderActionIdeas();
   renderTopUp();
   renderInactive();
@@ -595,7 +579,7 @@ function renderDetailCards() {
   if (DETAIL_SORTED.length) selectDetail(keep ? STATE.detailSelected : DETAIL_SORTED[0].symbol);
 }
 
-/** (Re)build the left position list (e.g. after fundamentals load). */
+/** (Re)build the left position list. */
 function renderDetailList() {
   const list = document.getElementById('detailList');
   list.innerHTML = DETAIL_SORTED.map(detailListItemHtml).join('');
@@ -608,9 +592,6 @@ function renderDetailList() {
 /** A single clickable row in the position list. */
 function detailListItemHtml(p) {
   const interp = interpretScore(p.scores.total);
-  const fund = STATE.fundamentals[p.symbol];
-  const fundBadge =
-    fund && fund.available ? `<span class="dli-fund" title="Fundamental-Score">F ${fund.score.composite}</span>` : '';
   return `
     <button type="button" class="detail-list-item" data-symbol="${escapeHtml(p.symbol)}">
       <span class="dli-main">
@@ -620,7 +601,6 @@ function detailListItemHtml(p) {
       <span class="dli-meta">
         <span class="dli-value">${fmtCurrency(p.value)}</span>
         <span class="score-pill ${interp.cls}">${p.scores.total}</span>
-        ${fundBadge}
       </span>
     </button>`;
 }
@@ -633,14 +613,7 @@ function selectDetail(symbol) {
   document.querySelectorAll('.detail-list-item').forEach((el) => {
     el.classList.toggle('active', el.dataset.symbol === symbol);
   });
-  // Tear down any previous fundamentals chart before re-rendering.
-  if (STATE.detailChart) {
-    STATE.detailChart.destroy();
-    STATE.detailChart = null;
-  }
-  const fund = STATE.fundamentals[symbol];
-  document.getElementById('detailPanel').innerHTML = detailCardHtml(p) + fundamentalsHtml(p, fund);
-  if (fund && fund.available && fund.dpsByYear && fund.dpsByYear.length) buildDetailDpsChart(fund);
+  document.getElementById('detailPanel').innerHTML = detailCardHtml(p);
 }
 
 function detailCardHtml(p) {
@@ -710,227 +683,6 @@ function detailCardHtml(p) {
   </div>`;
 }
 
-/* ----------------------------------------------------------------------------
- * V2: external fundamentals — control bar, batch loader & enriched rendering
- * --------------------------------------------------------------------------*/
-function renderFundBar() {
-  const bar = document.getElementById('fundBar');
-  if (!bar) return;
-
-  // No key yet -> show provider choice + inline key input (stored locally).
-  if (!ENRICH.enabled()) {
-    const prov = ENRICH.provider();
-    const docLink = prov === 'eodhd' ? 'https://eodhd.com/' : 'https://site.financialmodelingprep.com/developer/docs';
-    bar.innerHTML = `
-      <div class="fund-keyform">
-        <label class="fund-key-label">Datenanbieter wählen und API-Key eingeben, um Fundamentaldaten zu laden (Payout Ratio, FCF-Deckung, Dividenden-Streak &amp; -Historie):</label>
-        <div class="fund-key-row">
-          <select id="fundProvider" class="ctrl">
-            <option value="fmp"${prov === 'fmp' ? ' selected' : ''}>Financial Modeling Prep</option>
-            <option value="eodhd"${prov === 'eodhd' ? ' selected' : ''}>EODHD (bessere EU/ISIN-Abdeckung)</option>
-          </select>
-          <input type="password" id="fundKeyInput" class="ctrl" placeholder="API-Key einfügen" autocomplete="off" spellcheck="false" />
-          <button type="button" class="fund-btn" id="fundKeySave">Speichern &amp; laden</button>
-        </div>
-        <div class="fund-key-hint">Wird nur lokal in deinem Browser gespeichert (localStorage), nicht hochgeladen. <a id="fundKeyDoc" href="${docLink}" target="_blank" rel="noopener">Key erhalten →</a></div>
-      </div>`;
-    // Switch provider -> remember choice and refresh the form (updates doc link).
-    bar.querySelector('#fundProvider').addEventListener('change', (e) => {
-      ENRICH.setProvider(e.target.value);
-      renderFundBar();
-    });
-    const save = () => {
-      ENRICH.setProvider(bar.querySelector('#fundProvider').value);
-      const v = bar.querySelector('#fundKeyInput').value;
-      if (v && v.trim()) {
-        ENRICH.setApiKey(v);
-        renderFundBar();
-        loadAllFundamentals();
-      }
-    };
-    bar.querySelector('#fundKeySave').addEventListener('click', save);
-    bar.querySelector('#fundKeyInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') save();
-    });
-    return;
-  }
-
-  // Key present -> status + load/refresh + change-key.
-  const loaded = STATE.fundLoaded;
-  const vals = Object.values(STATE.fundamentals);
-  const ok = vals.filter((f) => f && f.available).length;
-
-  const providerName = ENRICH.providerName();
-  let statusHtml;
-  if (!loaded) {
-    statusHtml = `API-Key erkannt (${escapeHtml(providerName)}). Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).`;
-  } else if (ok > 0) {
-    statusHtml = `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: ${escapeHtml(providerName)}.`;
-  } else {
-    // Nothing enriched -> show the most common failure reason to aid debugging.
-    const reasons = vals.filter((f) => f && !f.available && f.reason).map((f) => f.reason);
-    const counts = {};
-    reasons.forEach((r) => (counts[r] = (counts[r] || 0) + 1));
-    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    const sample = top ? top[0] : 'unbekannter Grund';
-    const corsHint =
-      ENRICH.provider() === 'eodhd'
-        ? '„Load failed"/„Failed to fetch" → EODHD blockiert direkte Browser-Aufrufe (CORS); dafür ist ein Proxy nötig oder nutze FMP.'
-        : '„Failed to fetch" → CORS/Netzwerk.';
-    statusHtml =
-      `<strong>0 Werte angereichert.</strong> Häufigster Grund: „${escapeHtml(sample)}". ` +
-      `Hinweis: <code>HTTP 401</code> → Key ungültig/deaktiviert · <code>HTTP 403</code> → Endpoint nicht im Plan · ${corsHint} ` +
-      'Mehr Details: Browser-Konsole (F12).';
-  }
-
-  bar.innerHTML = `
-    <div class="fund-status" id="fundStatus">${statusHtml}</div>
-    <div class="fund-actions">
-      <button type="button" class="fund-btn" id="fundLoadBtn">${loaded ? 'Aktualisieren' : 'Fundamentaldaten laden (alle Positionen)'}</button>
-      <button type="button" class="fund-link" id="fundKeyChange">API-Key ändern</button>
-    </div>`;
-  bar.querySelector('#fundLoadBtn').addEventListener('click', loadAllFundamentals);
-  bar.querySelector('#fundKeyChange').addEventListener('click', () => {
-    ENRICH.clearApiKey();
-    STATE.fundLoaded = false;
-    STATE.fundamentals = {};
-    ENRICH.cache = {};
-    renderFundBar();
-    renderDetailList();
-    if (STATE.detailSelected) selectDetail(STATE.detailSelected);
-  });
-}
-
-/** Fetch fundamentals for all active positions (concurrency-limited). */
-async function loadAllFundamentals() {
-  if (!ENRICH.enabled()) return;
-  const btn = document.getElementById('fundLoadBtn');
-  const status = document.getElementById('fundStatus');
-  if (btn) btn.disabled = true;
-
-  const targets = STATE.active;
-  let done = 0;
-  let idx = 0;
-  const concurrency = Math.min(5, targets.length);
-
-  async function worker() {
-    while (idx < targets.length) {
-      const p = targets[idx++];
-      STATE.fundamentals[p.symbol] = await fetchFundamentals(p);
-      done++;
-      if (status) status.textContent = `Lade Fundamentaldaten … ${done}/${targets.length}`;
-    }
-  }
-
-  try {
-    await Promise.all(Array.from({ length: concurrency }, worker));
-  } finally {
-    STATE.fundLoaded = true;
-    // Console summary to make failures easy to read (F12).
-    const vals = Object.values(STATE.fundamentals);
-    const ok = vals.filter((f) => f && f.available).length;
-    const reasons = {};
-    vals.filter((f) => f && !f.available).forEach((f) => (reasons[f.reason] = (reasons[f.reason] || 0) + 1));
-    console.log(`[Income Lense] Fundamentaldaten: ${ok}/${vals.length} angereichert.`, reasons);
-    renderFundBar();
-    renderDetailList();
-    if (STATE.detailSelected) selectDetail(STATE.detailSelected);
-  }
-}
-
-/** HTML for the enriched fundamentals section under a detail card. */
-function fundamentalsHtml(p, fund) {
-  if (!fund) return ''; // not loaded yet -> fund bar explains
-  if (!fund.available) {
-    return `<div class="fund-na">Fundamentaldaten: ${escapeHtml(fund.reason || 'nicht verfügbar')}</div>`;
-  }
-
-  const f = fund;
-  const sc = f.score;
-  const interp = interpretScore(sc.composite);
-
-  const subBar = (label, valueText, pct) => `
-    <div class="fund-sub">
-      <div class="fund-sub-top"><span>${label}</span><span class="fund-sub-val">${valueText}</span></div>
-      <div class="score-bar"><div class="score-bar-fill" style="width:${hasNum(pct) ? pct : 0}%;background:${scoreColor(hasNum(pct) ? pct : 50)}"></div></div>
-    </div>`;
-
-  const block = (label, score, subs) => `
-    <div class="fund-block">
-      <div class="fund-block-head">
-        <span class="fund-block-score" style="color:${scoreColor(score)}">${score}</span>
-        <span class="fund-block-label">${label}</span>
-      </div>
-      ${subs}
-    </div>`;
-
-  const kpi = (l, v) => `<div class="fund-kpi"><div class="fund-kpi-l">${l}</div><div class="fund-kpi-v">${v}</div></div>`;
-
-  const fcfCovText = hasNum(f.fcfCoverage) ? `${fmtNumber(f.fcfCoverage, 1)}x` : 'n/a';
-  const streakText = hasNum(f.streak) ? `${f.streak}+ J.` : 'n/a';
-
-  return `
-  <div class="fund-section">
-    <div class="fund-header">
-      <div class="fund-shield ${interp.cls}">
-        <div class="fund-shield-num">${sc.composite}</div>
-        <div class="fund-shield-lbl">Dividend</div>
-      </div>
-      <div class="fund-head-text">
-        <div class="fund-head-title">Fundamental-Score: ${interp.label}</div>
-        <div class="fund-head-sum">${escapeHtml(f.summary)}</div>
-        <div class="fund-source">Quelle: ${escapeHtml(f.source)} · Symbol „${escapeHtml(f.providerSymbol || f.fmpSymbol || '')}"</div>
-      </div>
-    </div>
-
-    <div class="fund-blocks">
-      ${block('Sicherheit', sc.safety,
-        subBar('Payout Ratio', fmtPercent(f.payoutRatio, 1), mPayout(f.payoutRatio)) +
-        subBar('FCF-Deckung', fcfCovText, mFcfCoverage(f.fcfCoverage)))}
-      ${block('Wachstum', sc.growth,
-        subBar('Dividenden-Streak', streakText, mStreak(f.streak)) +
-        subBar('5J-CAGR', fmtPercent(f.cagr5, 1), mCagr(f.cagr5)))}
-      ${block('Einkommen', sc.income,
-        subBar('Aktuelle Rendite', fmtPercent(f.dividendYield, 2), mYield(f.dividendYield)))}
-    </div>
-
-    <div class="fund-kpis">
-      ${kpi('Dividendenrendite', fmtPercent(f.dividendYield, 2))}
-      ${kpi('Div./Anteil (TTM)', hasNum(f.dpsTTM) ? fmtNumber(f.dpsTTM, 2) : 'n/a')}
-      ${kpi('Payout Ratio', fmtPercent(f.payoutRatio, 1))}
-      ${kpi('5J-CAGR', fmtPercent(f.cagr5, 1))}
-    </div>
-
-    <div class="fund-chart-title">Dividende je Anteil – Historie</div>
-    <div class="fund-chart-wrap"><canvas id="fundDpsChart"></canvas></div>
-  </div>`;
-}
-
-/** Build the DPS-history bar chart in the detail panel. */
-function buildDetailDpsChart(f) {
-  const el = document.getElementById('fundDpsChart');
-  if (!el) return;
-  const data = f.dpsByYear.slice(-12);
-  STATE.detailChart = new Chart(el.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: data.map((d) => d.year),
-      datasets: [{ data: data.map((d) => d.dps), backgroundColor: '#2ecc71', borderRadius: 4 }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (c) => ' ' + fmtNumber(c.parsed.y, 2) } },
-      },
-      scales: {
-        x: { grid: { display: false } },
-        y: { ticks: { callback: (v) => fmtNumber(v, 2) }, grid: { color: 'rgba(255,255,255,0.05)' } },
-      },
-    },
-  });
-}
 
 /* ----------------------------------------------------------------------------
  * Action ideas

@@ -12,7 +12,6 @@ Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://d
 - **Handlungsempfehlungen:** Individuelle, priorisierte Empfehlungen für das Depot (Hoch/Mittel/Chance), abgeleitet aus Scores, Konzentration, Wachstum und Einkommen – z. B. Länder-/Sektor-/Einkommensklumpen, Übergewichtungen, Renditefallen, kritische Scores und untergewichtete Qualitätswerte. Bewusst abwägende, nicht-beratende Wortwahl.
 - **Charts (Chart.js):** Allokation nach Sektor, Land und Wertpapierart; Top 10 nach Marktwert; Top 10 nach jährlicher Dividende; Dividendenbeitrag nach Sektor.
 - **Positionsübersicht:** sortier- und filterbare Tabelle (Suche, Sektor, Land, Aktionskategorie; Sortierung nach Wert, Dividende, Anteil, Rendite, CAGR, Score).
-- **Detailanalyse mit Fundamentaldaten (V2, optional):** Mit einem [Financial-Modeling-Prep](https://financialmodelingprep.com/)-API-Key lädt der Detailanalyse-Tab echte Fundamentaldaten – Payout Ratio, FCF-Deckung, Dividenden-Streak, Dividenden-Historie und 5J-CAGR – und berechnet daraus einen Fundamental-Score (Sicherheit/Wachstum/Einkommen). Der Key wird direkt im Tab eingegeben (nur lokal im Browser via localStorage gespeichert). Ohne Key bleibt die App rein CSV-basiert (V1-Verhalten).
 - **Detaillierte Positionskarten:** je aktiver Position ein großer Score-Kreis (0–100), fünf Teil-Scores (Sicherheit, Einkommen, Wachstum, Depot-Fit, Konzentrationsrisiko), alle relevanten Kennzahlen und 3–6 automatische Insights.
 - **Action Ideas:** Gruppierung in Aufstockungskandidaten, Halten, Beobachten, Nicht weiter aufstocken, Reduzierung prüfen, Inaktiv/Watchlist.
 - **Dividendenkalender:** Erwartete Bruttoausschüttung je Monat (aus payDate + Frequenz auf das Jahr verteilt), stärkster Monat, nächster Zahltag, Summe der nächsten 30 Tage sowie eine Tabelle der kommenden Termine.
@@ -96,48 +95,11 @@ Jede Regel ist in `scoring.js` kommentiert; die Gewichte lassen sich leicht anpa
 
 ## Datenquellen & Grenzen
 
-**Ohne Proxy (CSV-only, Standard):** Die App nutzt ausschließlich die DivvyDiary-CSV.
-Fundamentaldaten wie Payout Ratio, FCF-Coverage, Verschuldung (Debt/EBITDA) oder
-Dividenden-Streak sind dann **nicht** enthalten und werden **nicht erfunden**;
-fehlende Werte erscheinen als `n/a`.
-
-**Mit API-Key (V2-Anreicherung, optional):** Der **Detailanalyse**-Tab lädt über
-[Financial Modeling Prep](https://financialmodelingprep.com/) zusätzlich Payout Ratio,
-FCF-Payout/-Coverage, Dividenden-Streak, Dividenden-Historie und 5J-CAGR und berechnet
-daraus einen Fundamental-Score. Nicht enthalten bleiben weiterhin u. a.
-Verschuldungsmetriken und Analystenratings.
-
-> Hinweis: Die Ticker-Zuordnung zum Anbieter erfolgt heuristisch (US-Ticker direkt,
-> EU-Werte mit Börsensuffix wie `.DE`/`.L`). Nicht auflösbare Werte werden sauber als
-> „nicht verfügbar" markiert. ETFs/Fonds/Krypto werden bewusst übersprungen.
-
-### Einrichtung der V2-Anreicherung
-
-Zwei Anbieter stehen zur Wahl (Dropdown im Detailanalyse-Tab):
-
-- **Financial Modeling Prep (FMP)** – gute US-Abdeckung; im Free-Tier ohne
-  FCF-Deckung (wird aus EPS/Quote ergänzt, FCF bleibt `n/a`).
-- **EODHD** – bessere **EU/internationale** Abdeckung und liefert i. d. R. auch
-  **FCF-Deckung**. ([Key](https://eodhd.com/))
-
-Schritte:
-1. Kostenlosen API-Key beim gewünschten Anbieter holen
-   ([FMP](https://site.financialmodelingprep.com/developer/docs) · [EODHD](https://eodhd.com/)).
-2. Im Tab **Detailanalyse** den Anbieter wählen, den Key einfügen und auf
-   „Speichern & laden" klicken. Anbieter + Key werden nur lokal im Browser
-   (localStorage) gespeichert; „API-Key ändern" entfernt den Key wieder.
-3. Alternativ lassen sich Keys fest in `config.js` (`fmpApiKey` / `eodhdApiKey`,
-   `provider`) hinterlegen. ⚠️ Dann sind sie clientseitig sichtbar, sobald die
-   Seite deployed oder `config.js` committet wird – nur Keys mit engen Limits
-   verwenden. Das In-App-Feld hat Vorrang.
-
-> Sicherheitshinweis: In einer statischen App ist ein direkt genutzter API-Key prinzipiell
-> im Browser sichtbar. Verwende einen Free-Tier-Key mit engen Limits, den du jederzeit
-> neu generieren kannst.
-
-Alternative Anbieter (z. B. [EODHD](https://eodhd.com/) für ISIN/EU-Abdeckung,
-[Alpha Vantage](https://www.alphavantage.co/)) lassen sich über `enrichment.js` + Proxy
-anbinden.
+Die App nutzt **ausschließlich die DivvyDiary-CSV** (CSV-only). Fundamentaldaten wie
+Payout Ratio, FCF-Coverage, Verschuldung (Debt/EBITDA), Dividenden-Streak oder
+Analystenratings sind **nicht** enthalten und werden **nicht erfunden**; fehlende Werte
+erscheinen als `n/a`. Alle Berechnungen laufen lokal im Browser; es werden keine
+externen APIs aufgerufen.
 
 ---
 
@@ -146,11 +108,9 @@ anbinden.
 ```
 index.html        # Seitenstruktur, lädt CDN- und App-Skripte
 styles.css        # Dark-mode Premium-Design
-config.js         # Optionaler FMP-Key-Fallback (In-App-Feld hat Vorrang)
 formatting.js     # CSV-Parsing (Komma-Dezimal) & Formatierung (de-DE)
 scoring.js        # Transparentes, regelbasiertes Scoring-Modell
 insights.js       # Regelbasierte Insights & Action-Kategorisierung
-enrichment.js     # V2: Fundamentaldaten via FMP + Fundamental-Score
 app.js            # Hauptlogik: Parsing, KPIs, Charts, Tabelle, Karten
 README.md         # Diese Datei
 ```

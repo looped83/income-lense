@@ -23,11 +23,9 @@ Alle Berechnungen passieren im Browser; die CSV verlässt das Gerät nicht.
 ```
 index.html      # Seitengerüst: Header, sticky Tab-Nav, alle Tab-Sektionen, CDN- & App-Skripte
 styles.css      # komplettes Dark-Mode-Design
-config.js       # optionaler FMP-Key-Fallback (In-App-Feld hat Vorrang)
 formatting.js   # CSV-Parsing (Komma-Dezimal) + de-DE-Formatierung
 scoring.js      # transparentes, regelbasiertes Scoring-Modell (0–100)
 insights.js     # Insights, Einordnung (Action-Kategorien), Aufstock-Logik
-enrichment.js   # V2: Fundamentaldaten via FMP + Fundamental-Score
 app.js          # Hauptlogik: Parsing, State, KPIs, Charts, alle Tabs/Renderer
 README.md       # Nutzer-/Deployment-Doku
 handover.md     # dieses Dokument
@@ -35,8 +33,7 @@ LICENSE
 ```
 
 **Ladereihenfolge** (in `index.html`, am Ende von `<body>`):
-PapaParse → Chart.js (CDN) → `config.js` → `formatting.js` → `scoring.js` →
-`insights.js` → `enrichment.js` → `app.js`.
+PapaParse → Chart.js (CDN) → `formatting.js` → `scoring.js` → `insights.js` → `app.js`.
 Alles als globale Skripte (keine ES-Module), damit es per `file://` und auf GitHub Pages läuft.
 
 ### Cache-Busting
@@ -194,40 +191,6 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 
 ---
 
-## 10b. V2 – Fundamentaldaten in der Detailanalyse (`enrichment.js`, `config.js`, `proxy/`)
-
-Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
-**Financial Modeling Prep (FMP)**.
-
-- **Key-Handhabung:** Direktaufrufe mit API-Key. Anbieter + Key kommen aus dem
-  **In-App-Feld** (localStorage: `incomeLense.provider`, `incomeLense.<provider>Key`)
-  oder ersatzweise aus `config.js` (`provider`, `fmpApiKey`, `eodhdApiKey`); das In-App-Feld
-  hat Vorrang. `ENRICH.enabled()` = Key vorhanden; ohne Key bleibt alles CSV-only (V1).
-  Kein Proxy. ⚠️ In einer statischen App ist ein direkt genutzter Key clientseitig
-  sichtbar → Key mit engen Limits verwenden.
-- **`enrichment.js`:** Zwei Anbieter über `ENRICH.provider()` (`'fmp' | 'eodhd'`).
-  `fetchFundamentals(pos)` dispatcht zu `fetchFmp`/`fetchEodhd`.
-  - **FMP** (stable API): `stable/dividends`, `ratios-ttm`, `cash-flow-statement`,
-    `profile`, `quote`; Payout/Yield fallen bei gesperrtem Free-Tier auf Quote-EPS/Kurs
-    zurück (FCF dann `n/a`). Symbol via `fmpSymbol()` (US direkt, EU `.DE`/`.L`/…).
-  - **EODHD**: `fundamentals/{T.EX}` + `div/{T.EX}`; liefert Payout, Yield, EPS und
-    meist **FCF-Deckung** (aus `Financials.Cash_Flow.yearly`); Symbol via `eodhdSymbol()`
-    (`.US`/`.XETRA`/`.LSE`/`.TO`/`.AS`/`.PA`).
-  - Gemeinsam: `dividendSeries()` (DPS-Historie/-TTM, Streak, 5J-CAGR),
-    `scoreFundamentals()` (Sicherheit/Wachstum/Einkommen, `ENRICH_WEIGHTS` 0,5/0,3/0,2),
-    `finalizeFundamentals()`. Nur `EQUITY`; Ergebnisse in `ENRICH.cache`/`STATE.fundamentals`.
-- **`app.js`:** `renderFundBar()` (Button/Status), `loadAllFundamentals()` (Batch über
-  alle aktiven Positionen, Concurrency 5, Fortschritt), `fundamentalsHtml()` +
-  `buildDetailDpsChart()` (angereicherte Ansicht: Score-Shield, Blöcke, KPIs,
-  DPS-Historien-Chart). `selectDetail()` hängt die Fundamentaldaten unter die V1-Karte;
-  die Positionsliste bekommt ein „F <score>"-Badge.
-- **Limits:** FMP Free-Tier ~250 Calls/Tag; pro Einzelaktie bis zu 4 Calls. Antworten
-  werden proxyseitig 1 h gecacht. Bei fehlenden Daten → „nicht verfügbar" (nichts erfunden).
-- **Einrichtung:** FMP-Key im Detailanalyse-Tab ins Eingabefeld einfügen → „Speichern &
-  laden". „API-Key ändern" löscht ihn wieder.
-
----
-
 ## 11. Formatierung (`formatting.js`)
 
 - `parseNum` – Komma-Dezimal-Parsing (Kernstück des CSV-Imports).
@@ -300,9 +263,9 @@ Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
 10. Einheitliche deutsche Tab-Namen + logische Reihenfolge; „Info & Grenzen" entfernt;
     dividendenlose Werte als Hinweis.
 11. Vereinfachter Empty-State.
-12. **V2:** Detailanalyse mit optionalen Fundamentaldaten (FMP via Serverless-Proxy),
-    `config.js` + `enrichment.js` + `proxy/`, Fundamental-Score & DPS-Historie,
-    „Alle Positionen laden", Listen-Badges. Footer auf V2.
+12. V2-Experiment: externe Fundamentaldaten (FMP/EODHD) in der Detailanalyse –
+    nach Tests wieder **entfernt** (statische App + CORS/Plan-Limits). Die App ist
+    wieder vollständig CSV-only.
 
 > Hinweis: Die Modell-ID des verwendeten Assistenten ist bewusst **nicht** in
 > Code/Artefakten hinterlegt.
