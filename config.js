@@ -16,5 +16,7 @@
  * Das In-App-Feld hat Vorrang vor diesem Wert.
  * ==========================================================================*/
 window.INCOME_LENSE_CONFIG = {
-  fmpApiKey: '',
+  // Fest hinterlegter FMP-Key (auf der deployten Seite öffentlich sichtbar –
+  // bewusst gewählt). Bei Bedarf hier ersetzen.
+  fmpApiKey: 'd11cfjRhaaFsbM08lb8LBiDmCDu6IuB6',
 };
