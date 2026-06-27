@@ -24,6 +24,8 @@ const STATE = {
   charts: {}, // Chart.js instances (so we can destroy/rebuild)
   detailSelected: null, // currently selected symbol in the detail tab
   targetMonthly: 3500, // Zieldepot 2033: net monthly dividend goal (€)
+  targetExcluded: new Set(), // Zieldepot: symbols excluded from new investments
+  targetSavings: 0, // Zieldepot: savings-rate scenario (€/month)
 };
 
 // Zieldepot 2033 configuration.
@@ -71,6 +73,15 @@ document.addEventListener('DOMContentLoaded', () => {
         STATE.targetMonthly = v;
         renderTarget();
       }
+    });
+
+  // Zieldepot 2033: savings-rate scenario (what you'd reach with €/month).
+  const targetSavings = document.getElementById('targetSavings');
+  if (targetSavings)
+    targetSavings.addEventListener('input', () => {
+      const v = parseFloat(targetSavings.value);
+      STATE.targetSavings = Number.isFinite(v) && v > 0 ? v : 0;
+      renderTarget();
     });
 
   setupNav();
@@ -172,6 +183,9 @@ function handleParsedData(rows) {
   STATE.positions = positions;
   STATE.active = positions.filter((p) => p.isActive);
   STATE.inactive = positions.filter((p) => !p.isActive);
+
+  // Reset Zieldepot scenario state for the new CSV.
+  STATE.targetExcluded = new Set();
 
   // Build portfolio context + KPIs from the ACTIVE positions only.
   STATE.ctx = buildContext(STATE.active);
@@ -1376,17 +1390,19 @@ function computeTarget() {
   const gap = Math.max(0, targetAnnual - projectedNet);
   const growth = Math.pow(1 + gAvg, years);
 
-  // Split the missing net dividend across dividend payers, weighted by quality
-  // score, and compute the additional capital per position from its own net
-  // yield & growth. The headline lump sum is the sum of these (so the rows add
-  // up); the monthly savings rate is derived from the lump via growth.
-  const payers = rows.filter((r) => r.netNow > 0);
-  const scoreSum = payers.reduce((s, r) => s + r.p.scores.total, 0);
+  // Split the missing net dividend across the dividend payers still being
+  // invested into (not deactivated), weighted by quality score. Capital per
+  // position uses its own net yield & growth; the headline lump sum is the sum
+  // of these (rows add up). Deactivated titles keep growing organically but
+  // receive no new capital.
   let lump = 0;
   rows.forEach((r) => {
+    r.excluded = STATE.targetExcluded.has(r.p.symbol);
     r.share = 0;
     r.addCapital = 0;
   });
+  const payers = rows.filter((r) => r.netNow > 0 && !r.excluded);
+  const scoreSum = payers.reduce((s, r) => s + r.p.scores.total, 0);
   if (gap > 0 && scoreSum > 0) {
     payers.forEach((r) => {
       r.share = gap * (r.p.scores.total / scoreSum); // missing net dividend p.a.
@@ -1402,7 +1418,15 @@ function computeTarget() {
   // Monthly savings whose future value (grown at gAvg) equals the lump grown at gAvg.
   const monthly = lump > 0 && annuityFactor > 0 ? (lump * growth) / annuityFactor : 0;
 
-  return { years, rows, payers, currentNet, projectedNet, gAvg, yPort, targetAnnual, gap, lump, monthly };
+  // Savings-rate scenario: net dividend reached by 2033 if STATE.targetSavings
+  // €/month is invested at the portfolio net yield (capital grows at gAvg).
+  const scenarioReachedAnnual = projectedNet + yPort * STATE.targetSavings * annuityFactor;
+
+  return {
+    years, rows, payers, currentNet, projectedNet, gAvg, yPort, targetAnnual, gap, lump, monthly,
+    noPayers: gap > 0 && scoreSum <= 0,
+    scenarioReachedAnnual,
+  };
 }
 
 function renderTarget() {
@@ -1417,10 +1441,14 @@ function renderTarget() {
     b.classList.toggle('active', parseInt(b.dataset.target, 10) === STATE.targetMonthly);
   });
 
-  // Summary line (with realistic-goal hint).
+  // Summary line (with realistic-goal hint / all-deactivated warning).
   const summary = document.getElementById('targetSummary');
   if (reached) {
     summary.innerHTML = `✅ Dein projiziertes Netto-Einkommen 2033 (${fmtCurrency(projMonthly)}/Monat) erreicht das Ziel von ${fmtCurrency(STATE.targetMonthly)}/Monat bereits.`;
+  } else if (t.noPayers) {
+    summary.innerHTML =
+      `Zum Ziel fehlen <strong>${fmtCurrency(diffMonthly)}/Monat</strong> (${fmtCurrency(t.gap)} netto p.a.). ` +
+      '<strong>Alle Werte sind zum Besparen deaktiviert</strong> – aktiviere unten mindestens einen Wert, um den Kapitalbedarf zu sehen.';
   } else {
     let hint = '';
     if (STATE.targetMonthly >= 3500 && t.lump > STATE.kpis.totalValue * 1.5) {
@@ -1429,6 +1457,19 @@ function renderTarget() {
     summary.innerHTML =
       `Bis ${t.years} Jahre bis 2033. Zum Ziel fehlen aktuell <strong>${fmtCurrency(diffMonthly)}/Monat</strong> ` +
       `(${fmtCurrency(t.gap)} netto p.a.).${hint}`;
+  }
+
+  // Savings-rate scenario result (inverse: given €/month, what do you reach?).
+  const savEl = document.getElementById('targetSavingsResult');
+  if (savEl) {
+    if (STATE.targetSavings > 0) {
+      const reachedM = t.scenarioReachedAnnual / 12;
+      const pct = STATE.targetMonthly > 0 ? reachedM / STATE.targetMonthly : 0;
+      const hitsGoal = reachedM >= STATE.targetMonthly;
+      savEl.innerHTML = `→ Mit <strong>${fmtCurrency(STATE.targetSavings)}/Mon</strong> erreichst du bis 2033 ca. <strong>${fmtCurrency(reachedM)}/Mon</strong> netto (${fmtPercent(pct, 0)} des Ziels)${hitsGoal ? ' ✅' : ''}.`;
+    } else {
+      savEl.textContent = '';
+    }
   }
 
   const cards = [
@@ -1447,32 +1488,44 @@ function renderTarget() {
     )
     .join('');
 
-  // Per-position gap split by quality score (dividend payers only).
+  // Per-position table: all dividend payers, each with a "Besparen" toggle.
+  // Deactivated titles keep their projection but get no extra capital.
   const tbody = document.getElementById('targetBody');
   const countEl = document.getElementById('targetCount');
-  if (reached) {
-    countEl.textContent = '';
-    tbody.innerHTML = '<tr><td colspan="7" class="conc-empty">Ziel bereits erreicht – kein zusätzlicher Kapitalbedarf.</td></tr>';
-    return;
-  }
+  const tableRows = t.rows.filter((r) => r.netNow > 0).sort((a, b) => b.p.scores.total - a.p.scores.total);
 
-  const ranked = [...t.payers].sort((a, b) => b.p.scores.total - a.p.scores.total);
+  countEl.textContent = reached
+    ? 'Ziel bereits erreicht – kein zusätzlicher Kapitalbedarf. Schalter zum Szenario-Spielen unten.'
+    : `Verteilung von ${fmtCurrency(t.gap)} fehlender Netto-Dividende p.a. auf ${t.payers.length} besparte Werte (nach Score). Summe Zusatz-Kapital = ${fmtCurrency(t.lump)}.`;
 
-  countEl.textContent = `Verteilung von ${fmtCurrency(t.gap)} fehlender Netto-Dividende p.a. auf ${t.payers.length} Dividendenzahler (nach Score). Summe Zusatz-Kapital = ${fmtCurrency(t.lump)}.`;
-  tbody.innerHTML = ranked
-    .map(
-      (r) => `
-      <tr>
+  tbody.innerHTML = tableRows
+    .map((r) => {
+      const off = r.excluded;
+      const shareTxt = off || reached ? '—' : fmtCurrency(r.share);
+      const capTxt = off || reached ? '—' : fmtCurrency(r.addCapital);
+      return `
+      <tr class="${off ? 'target-row-off' : ''}">
         <td class="t-sym">${escapeHtml(r.p.symbol)}</td>
         <td class="t-name" title="${escapeHtml(r.p.name)}">${escapeHtml(r.p.name)}</td>
         <td class="t-num">${fmtCurrency(r.netNow)}</td>
         <td class="t-num">${fmtCurrency(r.netProj)}</td>
-        <td class="t-num">${fmtCurrency(r.share)}</td>
-        <td class="t-num"><strong>${fmtCurrency(r.addCapital)}</strong></td>
+        <td class="t-num">${shareTxt}</td>
+        <td class="t-num"><strong>${capTxt}</strong></td>
         <td class="t-num">${r.p.scores.total}</td>
-      </tr>`
-    )
+        <td><input type="checkbox" class="target-toggle" data-symbol="${escapeHtml(r.p.symbol)}" ${off ? '' : 'checked'} title="Wert besparen / nicht besparen" /></td>
+      </tr>`;
+    })
     .join('');
+
+  // Wire the per-title toggles (recompute live for scenario play).
+  tbody.querySelectorAll('.target-toggle').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const sym = cb.dataset.symbol;
+      if (cb.checked) STATE.targetExcluded.delete(sym);
+      else STATE.targetExcluded.add(sym);
+      renderTarget();
+    });
+  });
 }
 
 /* ----------------------------------------------------------------------------

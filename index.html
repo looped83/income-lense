@@ -6,7 +6,7 @@
   <title>Income Lense</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=26" />
 </head>
 <body>
   <!-- ============================ HEADER ============================ -->
@@ -225,6 +225,13 @@
             <input type="number" id="targetCustom" class="ctrl" min="0" step="100" placeholder="€/Monat" />
           </label>
         </div>
+        <div class="target-controls">
+          <span class="target-label">Sparraten-Szenario:</span>
+          <label class="target-custom">Sparrate (€/Mon):
+            <input type="number" id="targetSavings" class="ctrl" min="0" step="50" placeholder="z. B. 500" />
+          </label>
+          <span id="targetSavingsResult" class="target-savings-result"></span>
+        </div>
         <div id="targetSummary" class="block-note"></div>
         <div id="targetKpis" class="kpi-grid"></div>
 
@@ -241,6 +248,7 @@
                 <th class="t-num">Zusatz-Div. nötig p.a.</th>
                 <th class="t-num">Zusatz-Kapital</th>
                 <th class="t-num">Score</th>
+                <th>Besparen</th>
               </tr>
             </thead>
             <tbody id="targetBody"></tbody>
@@ -368,9 +376,9 @@
 
   <!-- ====================== APP MODULES ====================== -->
   <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=25"></script>
-  <script src="scoring.js?v=25"></script>
-  <script src="insights.js?v=25"></script>
-  <script src="app.js?v=25"></script>
+  <script src="formatting.js?v=26"></script>
+  <script src="scoring.js?v=26"></script>
+  <script src="insights.js?v=26"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>

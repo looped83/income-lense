@@ -423,6 +423,10 @@ code {
 .target-btn.active { border-color: var(--green); color: var(--green); background: var(--green-soft); }
 .target-custom { font-size: 13px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 6px; }
 .target-custom input { width: 120px; }
+.target-savings-result { font-size: 13px; color: var(--text); }
+.target-row-off { opacity: 0.45; }
+.target-row-off .t-sym { text-decoration: line-through; }
+.target-toggle { width: 16px; height: 16px; cursor: pointer; accent-color: var(--green); }
 
 /* ------------------------ Risk & concentration -------------------- */
 .risk-subtitle { font-size: 15px; font-weight: 700; margin: 26px 0 12px; }
