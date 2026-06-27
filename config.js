@@ -1,29 +1,20 @@
 /* ============================================================================
- * config.js  (clientseitig – wird im Browser geladen)
+ * config.js  (clientseitig)
  * ----------------------------------------------------------------------------
- * V2-Fundamentaldaten (Detailanalyse) sind optional. Es gibt zwei Wege:
+ * V2-Fundamentaldaten (Detailanalyse) sind optional und brauchen einen
+ * Financial-Modeling-Prep-API-Key.
  *
- *  OPTION A (empfohlen) – Serverless-Proxy:
- *    Der Proxy hält den geheimen FMP-Key serverseitig. Hier nur die Proxy-URL:
- *      fmpProxyUrl: "https://income-lense-proxy.<subdomain>.workers.dev"
- *    Siehe /proxy/README.md.
+ * Am einfachsten: den Key direkt IN DER APP eingeben – im Tab „Detailanalyse"
+ * erscheint dafür ein Eingabefeld. Der Key wird nur lokal im Browser
+ * gespeichert (localStorage) und muss nicht hier eingetragen werden.
  *
- *  OPTION B – FMP-API-Key direkt hinterlegen (Direktaufrufe an FMP):
- *      fmpApiKey: "DEIN_FMP_KEY"
+ * Alternativ kann der Key hier fest hinterlegt werden (fmpApiKey). Dann gilt:
+ *   ⚠️  Diese Datei läuft im Browser. Wird die Seite deployed (z. B. GitHub
+ *       Pages) oder config.js in ein öffentliches Repo committet, ist der Key
+ *       ÖFFENTLICH sichtbar. Dann nur einen Key mit engen Limits verwenden.
  *
- *    ⚠️  SICHERHEITSWARNUNG: Diese Datei läuft im Browser. Wird die Seite
- *        deployed (z. B. GitHub Pages) ODER config.js in ein öffentliches Repo
- *        committet, ist der Key ÖFFENTLICH einsehbar (View-Source / Network-Tab)
- *        und kann missbraucht werden. Empfehlungen, falls du den Key dennoch
- *        direkt nutzt:
- *          - nur einen FMP-Key mit engen Limits / Free-Tier verwenden,
- *          - config.js per .gitignore aus dem Repo halten,
- *          - oder doch Option A (Proxy) nutzen.
- *
- * Ist beides gesetzt, hat der Proxy Vorrang. Sind beide leer, bleibt die App
- * rein CSV-basiert (V1-Verhalten).
+ * Das In-App-Feld hat Vorrang vor diesem Wert.
  * ==========================================================================*/
 window.INCOME_LENSE_CONFIG = {
-  fmpProxyUrl: '',
   fmpApiKey: '',
 };

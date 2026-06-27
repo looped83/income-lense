@@ -23,13 +23,12 @@ Alle Berechnungen passieren im Browser; die CSV verlässt das Gerät nicht.
 ```
 index.html      # Seitengerüst: Header, sticky Tab-Nav, alle Tab-Sektionen, CDN- & App-Skripte
 styles.css      # komplettes Dark-Mode-Design
-config.js       # PUBLIC (kein Secret): Proxy-URL für V2-Anreicherung
+config.js       # optionaler FMP-Key-Fallback (In-App-Feld hat Vorrang)
 formatting.js   # CSV-Parsing (Komma-Dezimal) + de-DE-Formatierung
 scoring.js      # transparentes, regelbasiertes Scoring-Modell (0–100)
 insights.js     # Insights, Einordnung (Action-Kategorien), Aufstock-Logik
-enrichment.js   # V2: Fundamentaldaten via FMP-Proxy + Fundamental-Score
+enrichment.js   # V2: Fundamentaldaten via FMP + Fundamental-Score
 app.js          # Hauptlogik: Parsing, State, KPIs, Charts, alle Tabs/Renderer
-proxy/          # Serverless-Proxy (Cloudflare Worker) + Deployment-Anleitung
 README.md       # Nutzer-/Deployment-Doku
 handover.md     # dieses Dokument
 LICENSE
@@ -200,13 +199,12 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
 **Financial Modeling Prep (FMP)**.
 
-- **Sicherheit/Architektur:** Zwei Modi (in `config.js`):
-  **Proxy** (`fmpProxyUrl`, empfohlen – Cloudflare Worker in `proxy/cloudflare-worker.js`
-  hält den FMP-Key als Secret) oder **Direkt-Key** (`fmpApiKey` – einfacher, aber der
-  Key ist clientseitig sichtbar; nur Key mit engen Limits, `config.js` möglichst
-  gitignoren). `ENRICH.mode()` → `'proxy' | 'direct' | 'off'` (Proxy hat Vorrang).
-  Ohne beides bleibt alles CSV-only (V1). `fmpGet()` baut entweder die Proxy- oder die
-  Direkt-URL (`…&apikey=`).
+- **Key-Handhabung:** Direktaufrufe an FMP mit API-Key. Der Key kommt aus dem
+  **In-App-Feld** im Detailanalyse-Tab (localStorage, `ENRICH.KEY_STORE`) oder ersatzweise
+  aus `config.js` (`fmpApiKey`); das In-App-Feld hat Vorrang. `ENRICH.enabled()` = Key
+  vorhanden; ohne Key bleibt alles CSV-only (V1). `fmpGet()` baut die Direkt-URL
+  (`…&apikey=`). Kein Proxy mehr (entfernt). ⚠️ In einer statischen App ist ein direkt
+  genutzter Key clientseitig sichtbar → Free-Tier-Key mit engen Limits verwenden.
 - **`enrichment.js`:** `fetchFundamentals(pos)` ruft über den Proxy
   Dividenden-Historie, `ratios-ttm`, `cash-flow-statement`, `profile` ab und berechnet
   Payout Ratio, FCF-Payout/-Coverage, Dividenden-Streak, DPS-Historie/-TTM, 5J-CAGR,
@@ -222,8 +220,8 @@ Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
   die Positionsliste bekommt ein „F <score>"-Badge.
 - **Limits:** FMP Free-Tier ~250 Calls/Tag; pro Einzelaktie bis zu 4 Calls. Antworten
   werden proxyseitig 1 h gecacht. Bei fehlenden Daten → „nicht verfügbar" (nichts erfunden).
-- **Einrichtung:** `proxy/README.md` (Deploy + `wrangler secret put FMP_API_KEY`),
-  dann `fmpProxyUrl` in `config.js` setzen.
+- **Einrichtung:** FMP-Key im Detailanalyse-Tab ins Eingabefeld einfügen → „Speichern &
+  laden". „API-Key ändern" löscht ihn wieder.
 
 ---
 

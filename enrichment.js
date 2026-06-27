@@ -12,22 +12,34 @@
 
 const ENRICH = {
   cache: {}, // symbol -> result
-  proxyUrl() {
-    const cfg = window.INCOME_LENSE_CONFIG || {};
-    return (cfg.fmpProxyUrl || '').replace(/\/+$/, '');
-  },
+  KEY_STORE: 'incomeLense.fmpKey',
+  /** API key from the in-app field (localStorage) or, as fallback, config.js. */
   apiKey() {
+    try {
+      const k = localStorage.getItem(this.KEY_STORE);
+      if (k && k.trim()) return k.trim();
+    } catch (e) {
+      /* localStorage unavailable */
+    }
     const cfg = window.INCOME_LENSE_CONFIG || {};
     return (cfg.fmpApiKey || '').trim();
   },
-  /** 'proxy' | 'direct' | 'off' — proxy takes precedence when both are set. */
-  mode() {
-    if (this.proxyUrl()) return 'proxy';
-    if (this.apiKey()) return 'direct';
-    return 'off';
+  setApiKey(k) {
+    try {
+      localStorage.setItem(this.KEY_STORE, (k || '').trim());
+    } catch (e) {
+      /* ignore */
+    }
+  },
+  clearApiKey() {
+    try {
+      localStorage.removeItem(this.KEY_STORE);
+    } catch (e) {
+      /* ignore */
+    }
   },
   enabled() {
-    return this.mode() !== 'off';
+    return !!this.apiKey();
   },
 };
 
@@ -49,18 +61,12 @@ function isEnrichable(pos) {
   return (pos.securityType || '').toUpperCase() === 'EQUITY';
 }
 
-/** GET a path on FMP, via the proxy if configured, otherwise directly with the key. */
+/** GET a path on FMP directly using the stored API key. */
 async function fmpGet(path) {
-  const base = ENRICH.proxyUrl();
-  let url;
-  if (base) {
-    url = `${base}?path=${encodeURIComponent(path)}`;
-  } else {
-    const key = ENRICH.apiKey();
-    if (!key) throw new Error('kein Proxy/Key konfiguriert');
-    const sep = path.includes('?') ? '&' : '?';
-    url = `https://financialmodelingprep.com/api/${path}${sep}apikey=${encodeURIComponent(key)}`;
-  }
+  const key = ENRICH.apiKey();
+  if (!key) throw new Error('kein API-Key hinterlegt');
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `https://financialmodelingprep.com/api/${path}${sep}apikey=${encodeURIComponent(key)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();

@@ -53,9 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const budget = document.getElementById('topupBudget');
   if (budget) budget.addEventListener('input', renderTopUp);
 
-  // V2: load external fundamentals for all positions.
-  const fundBtn = document.getElementById('fundLoadBtn');
-  if (fundBtn) fundBtn.addEventListener('click', loadAllFundamentals);
+  // V2 fundamentals controls are wired dynamically in renderFundBar().
 
   setupNav();
 });
@@ -716,27 +714,58 @@ function detailCardHtml(p) {
  * V2: external fundamentals — control bar, batch loader & enriched rendering
  * --------------------------------------------------------------------------*/
 function renderFundBar() {
-  const btn = document.getElementById('fundLoadBtn');
-  const status = document.getElementById('fundStatus');
-  if (!btn || !status) return;
+  const bar = document.getElementById('fundBar');
+  if (!bar) return;
 
+  // No key yet -> show an inline key input (stored locally in the browser).
   if (!ENRICH.enabled()) {
-    btn.classList.add('hidden');
-    status.innerHTML =
-      'Fundamentaldaten (V2) inaktiv. In <code>config.js</code> eine Proxy-URL (<code>fmpProxyUrl</code>) oder einen API-Key (<code>fmpApiKey</code>) setzen, um Payout Ratio, FCF-Deckung, Dividenden-Streak und -Historie zu laden.';
+    bar.innerHTML = `
+      <div class="fund-keyform">
+        <label class="fund-key-label" for="fundKeyInput">FMP-API-Key eingeben, um Fundamentaldaten zu laden (Payout Ratio, FCF-Deckung, Dividenden-Streak &amp; -Historie):</label>
+        <div class="fund-key-row">
+          <input type="password" id="fundKeyInput" class="ctrl" placeholder="FMP-API-Key einfügen" autocomplete="off" spellcheck="false" />
+          <button type="button" class="fund-btn" id="fundKeySave">Speichern &amp; laden</button>
+        </div>
+        <div class="fund-key-hint">Wird nur lokal in deinem Browser gespeichert (localStorage), nicht hochgeladen. <a href="https://site.financialmodelingprep.com/developer/docs" target="_blank" rel="noopener">Kostenlosen Key erhalten →</a></div>
+      </div>`;
+    const save = () => {
+      const v = bar.querySelector('#fundKeyInput').value;
+      if (v && v.trim()) {
+        ENRICH.setApiKey(v);
+        renderFundBar();
+        loadAllFundamentals();
+      }
+    };
+    bar.querySelector('#fundKeySave').addEventListener('click', save);
+    bar.querySelector('#fundKeyInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') save();
+    });
     return;
   }
 
-  btn.classList.remove('hidden');
-  btn.disabled = false;
-  if (STATE.fundLoaded) {
-    const ok = Object.values(STATE.fundamentals).filter((f) => f && f.available).length;
-    status.innerHTML = `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: Financial Modeling Prep.`;
-    btn.textContent = 'Aktualisieren';
-  } else {
-    status.textContent = 'Fundamentaldaten verfügbar – jetzt laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).';
-    btn.textContent = 'Fundamentaldaten laden (alle Positionen)';
-  }
+  // Key present -> status + load/refresh + change-key.
+  const loaded = STATE.fundLoaded;
+  const ok = Object.values(STATE.fundamentals).filter((f) => f && f.available).length;
+  bar.innerHTML = `
+    <div class="fund-status" id="fundStatus">${
+      loaded
+        ? `Fundamentaldaten geladen: <strong>${ok}</strong> Werte angereichert · Quelle: Financial Modeling Prep.`
+        : 'API-Key erkannt. Jetzt Fundamentaldaten laden (nur Einzelaktien; ETFs/Fonds/Krypto werden übersprungen).'
+    }</div>
+    <div class="fund-actions">
+      <button type="button" class="fund-btn" id="fundLoadBtn">${loaded ? 'Aktualisieren' : 'Fundamentaldaten laden (alle Positionen)'}</button>
+      <button type="button" class="fund-link" id="fundKeyChange">API-Key ändern</button>
+    </div>`;
+  bar.querySelector('#fundLoadBtn').addEventListener('click', loadAllFundamentals);
+  bar.querySelector('#fundKeyChange').addEventListener('click', () => {
+    ENRICH.clearApiKey();
+    STATE.fundLoaded = false;
+    STATE.fundamentals = {};
+    ENRICH.cache = {};
+    renderFundBar();
+    renderDetailList();
+    if (STATE.detailSelected) selectDetail(STATE.detailSelected);
+  });
 }
 
 /** Fetch fundamentals for all active positions (concurrency-limited). */
@@ -744,7 +773,7 @@ async function loadAllFundamentals() {
   if (!ENRICH.enabled()) return;
   const btn = document.getElementById('fundLoadBtn');
   const status = document.getElementById('fundStatus');
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
 
   const targets = STATE.active;
   let done = 0;
@@ -756,7 +785,7 @@ async function loadAllFundamentals() {
       const p = targets[idx++];
       STATE.fundamentals[p.symbol] = await fetchFundamentals(p);
       done++;
-      status.textContent = `Lade Fundamentaldaten … ${done}/${targets.length}`;
+      if (status) status.textContent = `Lade Fundamentaldaten … ${done}/${targets.length}`;
     }
   }
 

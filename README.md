@@ -12,7 +12,7 @@ Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://d
 - **Handlungsempfehlungen:** Individuelle, priorisierte Empfehlungen für das Depot (Hoch/Mittel/Chance), abgeleitet aus Scores, Konzentration, Wachstum und Einkommen – z. B. Länder-/Sektor-/Einkommensklumpen, Übergewichtungen, Renditefallen, kritische Scores und untergewichtete Qualitätswerte. Bewusst abwägende, nicht-beratende Wortwahl.
 - **Charts (Chart.js):** Allokation nach Sektor, Land und Wertpapierart; Top 10 nach Marktwert; Top 10 nach jährlicher Dividende; Dividendenbeitrag nach Sektor.
 - **Positionsübersicht:** sortier- und filterbare Tabelle (Suche, Sektor, Land, Aktionskategorie; Sortierung nach Wert, Dividende, Anteil, Rendite, CAGR, Score).
-- **Detailanalyse mit Fundamentaldaten (V2, optional):** Über einen Serverless-Proxy (der den geheimen Financial-Modeling-Prep-Key hält) lädt der Detailanalyse-Tab echte Fundamentaldaten – Payout Ratio, FCF-Deckung, Dividenden-Streak, Dividenden-Historie und 5J-CAGR – und berechnet daraus einen Fundamental-Score (Sicherheit/Wachstum/Einkommen). Ohne konfigurierten Proxy bleibt die App rein CSV-basiert (V1-Verhalten). Einrichtung: siehe [`proxy/README.md`](proxy/README.md) und `config.js`.
+- **Detailanalyse mit Fundamentaldaten (V2, optional):** Mit einem [Financial-Modeling-Prep](https://financialmodelingprep.com/)-API-Key lädt der Detailanalyse-Tab echte Fundamentaldaten – Payout Ratio, FCF-Deckung, Dividenden-Streak, Dividenden-Historie und 5J-CAGR – und berechnet daraus einen Fundamental-Score (Sicherheit/Wachstum/Einkommen). Der Key wird direkt im Tab eingegeben (nur lokal im Browser via localStorage gespeichert). Ohne Key bleibt die App rein CSV-basiert (V1-Verhalten).
 - **Detaillierte Positionskarten:** je aktiver Position ein großer Score-Kreis (0–100), fünf Teil-Scores (Sicherheit, Einkommen, Wachstum, Depot-Fit, Konzentrationsrisiko), alle relevanten Kennzahlen und 3–6 automatische Insights.
 - **Action Ideas:** Gruppierung in Aufstockungskandidaten, Halten, Beobachten, Nicht weiter aufstocken, Reduzierung prüfen, Inaktiv/Watchlist.
 - **Dividendenkalender:** Erwartete Bruttoausschüttung je Monat (aus payDate + Frequenz auf das Jahr verteilt), stärkster Monat, nächster Zahltag, Summe der nächsten 30 Tage sowie eine Tabelle der kommenden Termine.
@@ -101,12 +101,11 @@ Fundamentaldaten wie Payout Ratio, FCF-Coverage, Verschuldung (Debt/EBITDA) oder
 Dividenden-Streak sind dann **nicht** enthalten und werden **nicht erfunden**;
 fehlende Werte erscheinen als `n/a`.
 
-**Mit Proxy (V2-Anreicherung, optional):** Ist in `config.js` eine Proxy-URL gesetzt,
-lädt der **Detailanalyse**-Tab über [Financial Modeling Prep](https://financialmodelingprep.com/)
-zusätzlich Payout Ratio, FCF-Payout/-Coverage, Dividenden-Streak, Dividenden-Historie
-und 5J-CAGR und berechnet daraus einen Fundamental-Score. Der API-Key bleibt geheim im
-Serverless-Proxy (siehe [`proxy/README.md`](proxy/README.md)). Nicht enthalten bleiben
-weiterhin u. a. Verschuldungsmetriken und Analystenratings.
+**Mit API-Key (V2-Anreicherung, optional):** Der **Detailanalyse**-Tab lädt über
+[Financial Modeling Prep](https://financialmodelingprep.com/) zusätzlich Payout Ratio,
+FCF-Payout/-Coverage, Dividenden-Streak, Dividenden-Historie und 5J-CAGR und berechnet
+daraus einen Fundamental-Score. Nicht enthalten bleiben weiterhin u. a.
+Verschuldungsmetriken und Analystenratings.
 
 > Hinweis: Die Ticker-Zuordnung zum Anbieter erfolgt heuristisch (US-Ticker direkt,
 > EU-Werte mit Börsensuffix wie `.DE`/`.L`). Nicht auflösbare Werte werden sauber als
@@ -114,17 +113,17 @@ weiterhin u. a. Verschuldungsmetriken und Analystenratings.
 
 ### Einrichtung der V2-Anreicherung
 
-**Option A – Proxy (empfohlen, Key bleibt geheim):**
-1. Proxy deployen (Cloudflare Worker o. Ä.) – siehe [`proxy/README.md`](proxy/README.md);
-   FMP-API-Key dort als Secret hinterlegen.
-2. In `config.js` die Proxy-URL eintragen (`fmpProxyUrl`).
-3. Im Tab **Detailanalyse** auf „Fundamentaldaten laden (alle Positionen)" klicken.
+1. Kostenlosen [FMP-API-Key](https://site.financialmodelingprep.com/developer/docs) holen.
+2. Im Tab **Detailanalyse** den Key in das Eingabefeld einfügen und auf
+   „Speichern & laden" klicken. Der Key wird nur lokal im Browser (localStorage)
+   gespeichert; „API-Key ändern" entfernt ihn wieder.
+3. Alternativ kann der Key fest in `config.js` (`fmpApiKey`) hinterlegt werden.
+   ⚠️ Dann ist er clientseitig sichtbar, sobald die Seite deployed oder `config.js`
+   committet wird – nur einen Key mit engen Limits verwenden. Das In-App-Feld hat Vorrang.
 
-**Option B – Key direkt in `config.js` (`fmpApiKey`):**
-Einfacher, aber ⚠️ der Key ist clientseitig sichtbar (View-Source/Network), sobald die
-Seite deployed oder `config.js` in ein öffentliches Repo committet wird. Nur mit einem
-Key mit engen Limits nutzen und `config.js` möglichst per `.gitignore` aus dem Repo halten.
-Ist beides gesetzt, hat der Proxy Vorrang.
+> Sicherheitshinweis: In einer statischen App ist ein direkt genutzter API-Key prinzipiell
+> im Browser sichtbar. Verwende einen Free-Tier-Key mit engen Limits, den du jederzeit
+> neu generieren kannst.
 
 Alternative Anbieter (z. B. [EODHD](https://eodhd.com/) für ISIN/EU-Abdeckung,
 [Alpha Vantage](https://www.alphavantage.co/)) lassen sich über `enrichment.js` + Proxy
@@ -137,13 +136,12 @@ anbinden.
 ```
 index.html        # Seitenstruktur, lädt CDN- und App-Skripte
 styles.css        # Dark-mode Premium-Design
-config.js         # PUBLIC: Proxy-URL für V2 (kein Key!)
+config.js         # Optionaler FMP-Key-Fallback (In-App-Feld hat Vorrang)
 formatting.js     # CSV-Parsing (Komma-Dezimal) & Formatierung (de-DE)
 scoring.js        # Transparentes, regelbasiertes Scoring-Modell
 insights.js       # Regelbasierte Insights & Action-Kategorisierung
-enrichment.js     # V2: Fundamentaldaten via FMP-Proxy + Fundamental-Score
+enrichment.js     # V2: Fundamentaldaten via FMP + Fundamental-Score
 app.js            # Hauptlogik: Parsing, KPIs, Charts, Tabelle, Karten
-proxy/            # Serverless-Proxy (Cloudflare Worker) + Anleitung
 README.md         # Diese Datei
 ```
 

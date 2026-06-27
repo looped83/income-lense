@@ -749,6 +749,24 @@ code {
   margin-bottom: 16px;
 }
 .fund-status { font-size: 12.5px; color: var(--text-dim); flex: 1; min-width: 240px; }
+.fund-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.fund-link {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.fund-link:hover { color: var(--text); }
+.fund-keyform { width: 100%; }
+.fund-key-label { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
+.fund-key-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.fund-key-row .ctrl { flex: 1; min-width: 220px; }
+.fund-key-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+.fund-key-hint a { color: var(--green); text-decoration: none; }
+.fund-key-hint a:hover { text-decoration: underline; }
 .fund-btn {
   background: var(--green);
   color: #06231a;
