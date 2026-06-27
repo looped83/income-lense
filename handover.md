@@ -23,23 +23,27 @@ Alle Berechnungen passieren im Browser; die CSV verlässt das Gerät nicht.
 ```
 index.html      # Seitengerüst: Header, sticky Tab-Nav, alle Tab-Sektionen, CDN- & App-Skripte
 styles.css      # komplettes Dark-Mode-Design
+config.js       # PUBLIC (kein Secret): Proxy-URL für V2-Anreicherung
 formatting.js   # CSV-Parsing (Komma-Dezimal) + de-DE-Formatierung
 scoring.js      # transparentes, regelbasiertes Scoring-Modell (0–100)
 insights.js     # Insights, Einordnung (Action-Kategorien), Aufstock-Logik
+enrichment.js   # V2: Fundamentaldaten via FMP-Proxy + Fundamental-Score
 app.js          # Hauptlogik: Parsing, State, KPIs, Charts, alle Tabs/Renderer
+proxy/          # Serverless-Proxy (Cloudflare Worker) + Deployment-Anleitung
 README.md       # Nutzer-/Deployment-Doku
 handover.md     # dieses Dokument
 LICENSE
 ```
 
 **Ladereihenfolge** (in `index.html`, am Ende von `<body>`):
-PapaParse → Chart.js (CDN) → `formatting.js` → `scoring.js` → `insights.js` → `app.js`.
+PapaParse → Chart.js (CDN) → `config.js` → `formatting.js` → `scoring.js` →
+`insights.js` → `enrichment.js` → `app.js`.
 Alles als globale Skripte (keine ES-Module), damit es per `file://` und auf GitHub Pages läuft.
 
 ### Cache-Busting
-Lokale Assets werden mit `?v=N` eingebunden (aktuell **`?v=13`**). **Wichtig:** Bei jeder
+Lokale Assets werden mit `?v=N` eingebunden (aktuell **`?v=14`**). **Wichtig:** Bei jeder
 Änderung an `styles.css`/`*.js` die Versionsnummer in `index.html` erhöhen
-(`sed -i 's/?v=13/?v=14/g' index.html`), sonst liefern Browser/GitHub Pages alte Dateien aus.
+(`sed -i 's/?v=14/?v=15/g' index.html`), sonst liefern Browser/GitHub Pages alte Dateien aus.
 
 ---
 
@@ -191,6 +195,34 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 
 ---
 
+## 10b. V2 – Fundamentaldaten in der Detailanalyse (`enrichment.js`, `config.js`, `proxy/`)
+
+Optionale Anreicherung des Detailanalyse-Tabs mit echten Fundamentaldaten von
+**Financial Modeling Prep (FMP)**.
+
+- **Sicherheit/Architektur:** Statische App → **Serverless-Proxy** (Cloudflare Worker in
+  `proxy/cloudflare-worker.js`) hält den FMP-Key als Secret. `config.js` enthält nur die
+  **Proxy-URL** (`fmpProxyUrl`), keinen Key. Ohne URL bleibt alles CSV-only (V1).
+- **`enrichment.js`:** `fetchFundamentals(pos)` ruft über den Proxy
+  Dividenden-Historie, `ratios-ttm`, `cash-flow-statement`, `profile` ab und berechnet
+  Payout Ratio, FCF-Payout/-Coverage, Dividenden-Streak, DPS-Historie/-TTM, 5J-CAGR,
+  Rendite. `scoreFundamentals()` bildet daraus einen transparenten Score
+  (Sicherheit/Wachstum/Einkommen, Gewichte `ENRICH_WEIGHTS` 0,5/0,3/0,2).
+  Ticker-Mapping via `fmpSymbol()` (US direkt, EU mit Suffix `.DE`/`.L`/`.TO`/`.AS`/`.PA`).
+  Nur `securityType === 'EQUITY'` wird angereichert; Ergebnisse werden in `ENRICH.cache`
+  und `STATE.fundamentals` gecacht.
+- **`app.js`:** `renderFundBar()` (Button/Status), `loadAllFundamentals()` (Batch über
+  alle aktiven Positionen, Concurrency 5, Fortschritt), `fundamentalsHtml()` +
+  `buildDetailDpsChart()` (angereicherte Ansicht: Score-Shield, Blöcke, KPIs,
+  DPS-Historien-Chart). `selectDetail()` hängt die Fundamentaldaten unter die V1-Karte;
+  die Positionsliste bekommt ein „F <score>"-Badge.
+- **Limits:** FMP Free-Tier ~250 Calls/Tag; pro Einzelaktie bis zu 4 Calls. Antworten
+  werden proxyseitig 1 h gecacht. Bei fehlenden Daten → „nicht verfügbar" (nichts erfunden).
+- **Einrichtung:** `proxy/README.md` (Deploy + `wrangler secret put FMP_API_KEY`),
+  dann `fmpProxyUrl` in `config.js` setzen.
+
+---
+
 ## 11. Formatierung (`formatting.js`)
 
 - `parseNum` – Komma-Dezimal-Parsing (Kernstück des CSV-Imports).
@@ -263,6 +295,9 @@ Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
 10. Einheitliche deutsche Tab-Namen + logische Reihenfolge; „Info & Grenzen" entfernt;
     dividendenlose Werte als Hinweis.
 11. Vereinfachter Empty-State.
+12. **V2:** Detailanalyse mit optionalen Fundamentaldaten (FMP via Serverless-Proxy),
+    `config.js` + `enrichment.js` + `proxy/`, Fundamental-Score & DPS-Historie,
+    „Alle Positionen laden", Listen-Badges. Footer auf V2.
 
 > Hinweis: Die Modell-ID des verwendeten Assistenten ist bewusst **nicht** in
 > Code/Artefakten hinterlegt.
