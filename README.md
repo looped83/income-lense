@@ -1,78 +1,67 @@
-# Dividend Portfolio Analyzer
+# Income Lense
 
-Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://divvydiary.com)-Portfolio-Exports (CSV). Sie liefert eine detaillierte, dark-mode Dividenden-Depotanalyse mit Kennzahlen, Charts, transparenten Scores, automatischen Insights und Action-Ideas – **vollständig im Browser**, ohne Backend, ohne Build-Step, ohne Datenupload.
+Eine **statische, rein lokale Web-App** zur Analyse eines [DivvyDiary](https://divvydiary.com)-Depot-Exports (CSV): Kennzahlen, transparente Scores, Risiko, Einkommen, Ziel 2033 und Aufstockplan – **vollständig im Browser**, ohne Backend, ohne Build-Step, ohne externe Abhängigkeiten.
 
-> ⚠️ **Keine Anlageberatung.** Alle Auswertungen dienen der Orientierung und basieren ausschließlich auf deiner CSV.
-
----
-
-## Was die App macht
-
-- **Portfolio-Kennzahlen (KPIs):** Depotwert, investiertes Kapital, unrealisiertes Plus/Minus (absolut & %), jährliche/monatliche Bruttodividende, gewichtete Dividendenrendite, gewichteter Yield on Cost, Anzahl aktiver Positionen & Dividendenzahler, größte Position, größter Dividendenzahler.
-- **Handlungsempfehlungen:** Individuelle, priorisierte Empfehlungen für das Depot (Hoch/Mittel/Chance), abgeleitet aus Scores, Konzentration, Wachstum und Einkommen – z. B. Länder-/Sektor-/Einkommensklumpen, Übergewichtungen, Renditefallen, kritische Scores und untergewichtete Qualitätswerte. Bewusst abwägende, nicht-beratende Wortwahl.
-- **Charts (Chart.js):** Allokation nach Sektor, Land und Wertpapierart; Top 10 nach Marktwert; Top 10 nach jährlicher Dividende; Dividendenbeitrag nach Sektor.
-- **Positionsübersicht:** sortier- und filterbare Tabelle (Suche, Sektor, Land, Aktionskategorie; Sortierung nach Wert, Dividende, Anteil, Rendite, CAGR, Score).
-- **Detaillierte Positionskarten:** je aktiver Position ein großer Score-Kreis (0–100), fünf Teil-Scores (Sicherheit, Einkommen, Wachstum, Depot-Fit, Konzentrationsrisiko), alle relevanten Kennzahlen und 3–6 automatische Insights.
-- **Action Ideas:** Gruppierung in Aufstockungskandidaten, Halten, Beobachten, Nicht weiter aufstocken, Reduzierung prüfen, Inaktiv/Watchlist.
-- **Dividendenkalender:** Erwartete Bruttoausschüttung je Monat (aus payDate + Frequenz auf das Jahr verteilt), stärkster Monat, nächster Zahltag, Summe der nächsten 30 Tage sowie eine Tabelle der kommenden Termine.
-- **Einkommens-Prognose:** Jahres-/Monatsdividende brutto und netto (nach Steuer via taxRate), effektiver Steuersatz, Netto-Rendite & Netto-Yield-on-Cost, monatliche Netto-vs-Brutto-Balken und eine 5-Jahres-Hochrechnung mit dem einkommensgewichteten Dividenden-CAGR.
-- **Zieldepot 2033:** Projiziert die **Netto**-Dividende bis 2033 (organisches Dividendenwachstum je Wert), vergleicht sie mit deinem Monatsziel (3.500 € / 2.000 € / eigenes), zeigt die Differenz und – um die Lücke zu schließen – den nötigen **Einmalbetrag** und die **monatliche Sparrate**. „Was pro Wert fehlt" wird nach Qualitäts-Score verteilt. Zusätzlich: ein **Sparraten-Szenario** (gib €/Monat ein → welche Netto-Dividende du bis 2033 erreichst) und ein **„Besparen"-Schalter pro Wert**, um einzelne Titel aus weiteren Investitionen auszunehmen – alles rechnet live für Szenarien.
-- **Risiko & Konzentration:** Eigener Risiko-Tab mit Diversifikations-Score, effektiver Positionsanzahl (HHI), Top-N-Anteil, größter Position/Sektor/Land, Einkommenskonzentration sowie regelbasierten Klumpenrisiko- und Renditefallen-Warnungen (Hoch/Mittel) und Konzentrations-Balken. „Gemischt" (breite ETFs) wird nicht als Einzelrisiko gewertet.
-- **Aufstock-Plan (1.000-€-Tranchen):** Für ein eingegebenes Budget wird ein greedy Plan erstellt, welche Werte du als Nächstes aufstocken könntest. Nach jeder Tranche wird die Allokation neu berechnet, sodass sich die Empfehlungen automatisch streuen. Jede Tranche enthält eine nachvollziehbare Begründung („Wieso?").
-- **Inaktiv-Bereich:** Positionen mit Marktwert = 0 werden aus den aktiven Berechnungen ausgeschlossen und separat gelistet.
-
-Alle Werte werden **aus der hochgeladenen CSV berechnet** – nichts ist hartkodiert.
-
-### Navigation
-
-Statt einer langen Seite ist das Dashboard in einzelne Bereiche („Seiten“) unterteilt, die über eine sticky Navigationsleiste umgeschaltet werden: **Übersicht**, **Handlungsempfehlungen**, **Allokation**, **Risiko**, **Einkommensprognose**, **Zieldepot 2033**, **Dividendenkalender**, **Aufstockplan**, **Einordnung**, **Positionen**, **Detailanalyse** und **Inaktiv** (nur falls vorhanden). Es ist immer nur ein Bereich sichtbar.
+> ⚠️ **Keine Anlage-, Steuer- oder Rechtsberatung.** Alle Auswertungen dienen der Orientierung und basieren ausschließlich auf deiner CSV.
 
 ---
 
-## Lokale Nutzung
+## Bereiche
 
-1. Repository herunterladen oder klonen.
-2. **`index.html` im Browser öffnen** (Doppelklick genügt).
-3. Oben rechts auf **„DivvyDiary-CSV laden“** klicken und deine Export-Datei wählen.
+| Tab | Inhalt |
+|---|---|
+| **Übersicht** | Depotwert & G/V, Dividenden brutto/netto, Kernkennzahlen, Schnellblick auf Handlungsbedarf, nächste Zahlungen und Ziel-Fortschritt |
+| **Empfehlungen** | Eine priorisierte Liste aller Hinweise (Hoch / Mittel / Chancen / Hinweise, filterbar) – inklusive Risiko-Warnungen |
+| **Risiko** | Diversifikations-Score, effektive Positionen (HHI), Gewichte nach Position, Dividenden, Sektor (Wert/Dividende umschaltbar), Land, Art, Währung – mit Warnschwellen |
+| **Einkommen** | Brutto/Netto, Steuern, Monatsverteilung (netto + Steuer), 5-Jahres-Hochrechnung, kommende Zahlungen nach Monat |
+| **Ziel 2033** | Netto-Projektion vs. Monatsziel, Einmalbetrag & Sparrate, Sparraten-Szenario, „Besparen“-Schalter je Wert |
+| **Aufstocken** | Budget in 1.000-€-Tranchen mit Begründung („Wieso?“) und Verteilung pro Wert |
+| **Positionen** | Such-, filter- und sortierbare Liste inkl. Einordnung (Kategorie-Chips) und inaktiver Werte |
 
-Es ist **kein** `npm`, keine Installation und kein Build-Step nötig. Chart.js und PapaParse werden per CDN geladen (eine Internetverbindung ist dafür beim ersten Laden erforderlich).
+Ein Tipp auf ein Symbol öffnet überall die **Detailanalyse** (Score-Ring, Teil-Scores, Kennzahlen, Insights) – auf dem Handy als Bottom-Sheet, am Desktop als Seitenpanel. Mit ‹ › bzw. den Pfeiltasten blätterst du nach Score.
+
+Tabs und Detailansicht stehen in der URL (`#risiko`, `#positionen/AAPL`) – Zurück-Taste, Neuladen und Lesezeichen funktionieren.
+
+---
+
+## Nutzung
+
+1. **`index.html` im Browser öffnen** (lokal per Doppelklick oder über GitHub Pages).
+2. CSV per **Upload-Button** wählen oder **auf die Seite ziehen**.
+3. Die CSV und deine Einstellungen (Monatsziel, Sparrate, Budget, Schalter) werden **nur lokal im Browser** gespeichert und beim nächsten Öffnen wiederhergestellt. Der Papierkorb-Button löscht die gespeicherten Daten.
+
+Keine Installation, kein `npm`, keine CDN- oder Font-Requests – die App funktioniert auch offline.
 
 ---
 
 ## Deployment auf GitHub Pages
 
-1. Alle Dateien liegen im **Repository-Root** (insbesondere `index.html`).
-2. In GitHub: **Settings → Pages**.
-3. Unter **Build and deployment → Source** „Deploy from a branch“ wählen.
-4. Branch auf `main` (oder den gewünschten Branch) und Ordner `/ (root)` setzen, speichern.
-5. Nach kurzer Zeit die generierte **GitHub-Pages-URL** öffnen (z. B. `https://<user>.github.io/<repo>/`).
+1. Alle Dateien liegen im **Repository-Root**.
+2. **Settings → Pages → Deploy from a branch**, Branch wählen, Ordner `/ (root)`.
+3. Nach Änderungen an CSS/JS die Versionsnummer `?v=N` in `index.html` erhöhen (Cache-Busting).
 
 ---
 
 ## Erwartetes CSV-Format
 
-- **Trennzeichen:** Semikolon (`;`)
-- **Dezimaltrennzeichen:** Komma (`,`) – z. B. `489,7182`
-- **Prozentwerte** sind Dezimalbrüche – z. B. `0,038554` wird als `3,86 %` angezeigt
+- **Trennzeichen:** Semikolon (`;`), **Dezimaltrennzeichen:** Komma (`489,7182`)
+- **Prozentwerte** als Dezimalbrüche (`0,038554` → `3,86 %`)
 - **Erste Zeile:** Spaltenüberschriften
 
-Erwartete Spalten (DivvyDiary-Export):
+Genutzte Spalten:
 
 ```
-symbol; isin; wkn; name; quantity; buyin; buyinTotal; price; value; gain; gainRel;
-currency; allocation; allocationOnBuyin; dividendYield; dividendYieldOnBuyin;
-totalDividendRate; dividendRate; dividendFrequency; dividendCagr; dividendCagrPeriod;
-sector; securityType; country; originalDividendCurrency; transactions; exDate; payDate;
-gainPrev; gainPrevRel; prevPricePeriod; note; taxRate
+symbol; isin; name; quantity; buyin; buyinTotal; price; value; gain; gainRel;
+allocation; dividendYield; dividendYieldOnBuyin; totalDividendRate; dividendRate;
+dividendFrequency; dividendCagr; dividendCagrPeriod; sector; securityType; country;
+originalDividendCurrency; exDate; payDate; taxRate
 ```
 
-Positionen mit `value = 0` gelten als **inaktiv** (verkauft / Watchlist) und fließen nicht in die aktiven Portfolio-Berechnungen ein.
+Positionen mit `value = 0` gelten als **inaktiv** (verkauft / Watchlist) und fließen nicht in die Depotberechnungen ein.
 
 ---
 
 ## Scoring-Modell (transparent & regelbasiert)
-
-Der Gesamt-Score (0–100) setzt sich gewichtet zusammen (siehe `scoring.js`, `SCORE_WEIGHTS`):
 
 | Block | Gewicht |
 |---|---|
@@ -80,44 +69,35 @@ Der Gesamt-Score (0–100) setzt sich gewichtet zusammen (siehe `scoring.js`, `S
 | Einkommensstärke | 25 % |
 | Wachstum | 20 % |
 | Depot-Fit | 15 % |
-| Konzentrationsrisiko (hoher Score = geringes Risiko) | 10 % |
+| Streuung (hoher Score = geringes Konzentrationsrisiko) | 10 % |
 
-Interpretation des Gesamt-Scores:
+Skala: **85+** Sehr stark · **70+** Stark · **55+** Solide · **40+** Schwach · **< 40** Kritisch.
 
-- **85–100:** Sehr stark
-- **70–84:** Stark
-- **55–69:** Solide / beobachten
-- **40–54:** Schwachstellen prüfen
-- **0–39:** Kritisch / nicht aufstocken
-
-Jede Regel ist in `scoring.js` kommentiert; die Gewichte lassen sich leicht anpassen.
+Alle Warnschwellen (Einzelwert, Sektor, Land, Dividendenanteil, Rendite, Buchverlust) stehen zentral in `LIMITS` (`scoring.js`) und gelten identisch für Scores, Risiko-Tab, Empfehlungen, Einordnung und Aufstockplan. Breit streuende ETFs/Fonds zählen nicht als Einzelwert- oder Einkommensklumpen.
 
 ---
 
 ## Datenquellen & Grenzen
 
-Die App nutzt **ausschließlich die DivvyDiary-CSV** (CSV-only). Fundamentaldaten wie
-Payout Ratio, FCF-Coverage, Verschuldung (Debt/EBITDA), Dividenden-Streak oder
-Analystenratings sind **nicht** enthalten und werden **nicht erfunden**; fehlende Werte
-erscheinen als `n/a`. Alle Berechnungen laufen lokal im Browser; es werden keine
-externen APIs aufgerufen.
+Ausschließlich die DivvyDiary-CSV. Fundamentaldaten (Payout Ratio, FCF, Verschuldung, Dividenden-Streak, Ratings) sind nicht enthalten und werden nicht erfunden; fehlende Werte erscheinen als `–`.
 
 ---
 
 ## Projektstruktur
 
 ```
-index.html        # Seitenstruktur, lädt CDN- und App-Skripte
-styles.css        # Dark-mode Premium-Design
-formatting.js     # CSV-Parsing (Komma-Dezimal) & Formatierung (de-DE)
-scoring.js        # Transparentes, regelbasiertes Scoring-Modell
-insights.js       # Regelbasierte Insights & Action-Kategorisierung
-app.js            # Hauptlogik: Parsing, KPIs, Charts, Tabelle, Karten
-README.md         # Diese Datei
+index.html      # Seitengerüst: Header, Tabs, Views, Detail-Dialog
+styles.css      # Design-Tokens + wiederverwendbare Komponenten
+formatting.js   # CSV-Parser, Zahlen-Parsing, de-DE-Formatierung
+scoring.js      # LIMITS, Positions-Helfer, Scoring-Modell, Score-Skala
+insights.js     # Einordnung, Insights, Aufstock-Modell
+analysis.js     # Reine Depot-Analyse (KPIs, Risiko, Empfehlungen, Einkommen, Ziel, Plan)
+app.js          # UI: Routing, Speicherung, Events, Komponenten, Views
+handover.md     # Technische Übergabe-Doku
 ```
 
 ---
 
 ## Datenschutz
 
-Die CSV wird **niemals hochgeladen**. Das gesamte Parsing und alle Berechnungen finden lokal in deinem Browser statt.
+Die CSV wird **nie hochgeladen** und es werden **keine externen Ressourcen** geladen. Parsing, Berechnung und Speicherung passieren ausschließlich lokal in deinem Browser.

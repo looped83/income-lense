@@ -1,272 +1,198 @@
 # Handover – Income Lense
 
 Übergabedokument für die statische Dividenden-Depotanalyse **Income Lense**.
-Stand: V1, Branch `claude/divvydiary-portfolio-dashboard-72gomm`.
+Stand: V2-UI (Audit-Überarbeitung), Cache-Version **`?v=27`**.
 
 ---
 
 ## 1. Was ist Income Lense?
 
 Eine **rein statische, lokale Web-App** zur Analyse eines DivvyDiary-CSV-Exports.
-Läuft durch Öffnen von `index.html` – ohne Build, ohne Backend, ohne Datenupload.
-Alle Berechnungen passieren im Browser; die CSV verlässt das Gerät nicht.
+Läuft durch Öffnen von `index.html` – ohne Build, ohne Backend, **ohne externe Abhängigkeiten**
+(kein CDN, keine Webfonts). Die CSV verlässt das Gerät nicht.
 
-- **Sprache:** Deutsch (UI)
-- **Design:** Dark Mode, „premium" Finanz-Dashboard, grüne Income-Akzente, orange/rote Risiko-Indikatoren
-- **Stack:** reines HTML/CSS/Vanilla-JS + Chart.js & PapaParse via CDN
-- **Deployment-Ziel:** GitHub Pages (alle Dateien im Repo-Root)
+- **Sprache:** Deutsch · **Design:** Dark Mode, Finanz-Dashboard, Statusfarben über `tone-*`
+- **Stack:** HTML/CSS/Vanilla-JS, globale Skripte (`defer`), läuft per `file://` und GitHub Pages
+- **Größe:** ~40 KB gzip gesamt, 7 Requests, 0 Fremd-Domains
 
 ---
 
-## 2. Projektstruktur
+## 2. Projektstruktur & Ladereihenfolge
 
 ```
-index.html      # Seitengerüst: Header, sticky Tab-Nav, alle Tab-Sektionen, CDN- & App-Skripte
-styles.css      # komplettes Dark-Mode-Design
-formatting.js   # CSV-Parsing (Komma-Dezimal) + de-DE-Formatierung
-scoring.js      # transparentes, regelbasiertes Scoring-Modell (0–100)
-insights.js     # Insights, Einordnung (Action-Kategorien), Aufstock-Logik
-app.js          # Hauptlogik: Parsing, State, KPIs, Charts, alle Tabs/Renderer
-README.md       # Nutzer-/Deployment-Doku
-handover.md     # dieses Dokument
-LICENSE
+formatting.js   # parseCsv, parseNum, Intl-Formatter-Cache, Labels, escapeHtml
+scoring.js      # LIMITS, sevOf, isFund/isDiversified/bucketShare/incomeShareOf/yieldSignal,
+                # Scoring (5 Blöcke), computeScores, scoreLevel (eine Skala)
+insights.js     # ACTION_CATEGORIES, classifyAction, buildInsights, Aufstock-Modell
+analysis.js     # buildPosition, computeContext, analyze() → KPIs, Risiko, Empfehlungen,
+                # Einkommen, kommende Zahlungen; computeTarget, buildTopUpPlan
+app.js          # UI: Speicherung, Routing, Event-Delegation, Komponenten, Views, Detail-Sheet
 ```
 
-**Ladereihenfolge** (in `index.html`, am Ende von `<body>`):
-PapaParse → Chart.js (CDN) → `formatting.js` → `scoring.js` → `insights.js` → `app.js`.
-Alles als globale Skripte (keine ES-Module), damit es per `file://` und auf GitHub Pages läuft.
+Reihenfolge in `index.html` (alle `defer`): formatting → scoring → insights → analysis → app.
+`analysis.js` ist DOM-frei und lässt sich in Node per `vm` laden und testen.
 
-### Cache-Busting
-Lokale Assets werden mit `?v=N` eingebunden (aktuell **`?v=14`**). **Wichtig:** Bei jeder
-Änderung an `styles.css`/`*.js` die Versionsnummer in `index.html` erhöhen
-(`sed -i 's/?v=14/?v=15/g' index.html`), sonst liefern Browser/GitHub Pages alte Dateien aus.
+**Cache-Busting:** Bei jeder Änderung an CSS/JS `?v=N` in `index.html` erhöhen
+(`sed -i 's/?v=27/?v=28/g' index.html`).
 
 ---
 
-## 3. Datenfluss & Parsing
+## 3. Datenfluss
 
-1. Upload (Header-Icon oder Button im Empty-State) → `onFileSelected` → **PapaParse**
-   (`delimiter: ';'`, `header: true`).
-2. `buildPosition(row)` typisiert jede Zeile; numerische Felder via `parseNum`
-   (Komma-Dezimal, optionale Tausenderpunkte → JS-Number; leer = `NaN`).
-3. **Aktiv vs. inaktiv:** `isActive = value > 0`. Aktive Positionen fließen in alle
-   Berechnungen; inaktive landen im Tab „Inaktiv".
-4. `buildContext(active)` aggregiert: `totalValue`, `totalAnnualDividend`,
-   `sectorAllocation`, `countryAllocation` (Anteile als Brüche).
-5. `computeKpis(active)` berechnet die Portfolio-Kennzahlen.
-6. Pro Position: `computeScores` → `buildInsights` → `classifyAction`.
-7. Render-Pipeline (`handleParsedData`): `renderKpis`, `renderCharts`,
-   `renderRecommendations`, `renderRisk`, `renderCalendar`, `renderIncome`,
-   `renderTable`, `renderDetailCards`, `renderActionIdeas`, `renderTopUp`,
-   `renderInactive`, dann `showView('view-overview')`.
-
-**Prozentwerte** liegen in der CSV als Brüche vor (z. B. `0,038554`) und werden mit
-`fmtPercent` als `3,86 %` ausgegeben.
-
-### Wichtige CSV-Felder
-`symbol, isin, name, quantity, buyin, buyinTotal, price, value, gain, gainRel,
-allocation, dividendYield, dividendYieldOnBuyin, totalDividendRate, dividendRate,
-dividendFrequency, dividendCagr, sector, securityType, country,
-originalDividendCurrency, exDate, payDate, taxRate`
+1. CSV per Upload-Button, Empty-State oder Drag & Drop → `readFile` → `loadCsv`.
+2. `parseCsv` (eigener RFC-4180-Parser: Quotes, `""`, CRLF, BOM, Delimiter-Erkennung) →
+   `buildPosition` (Komma-Dezimal via `parseNum`; aktiv = `value > 0`).
+3. `analyze(positions)`:
+   `computeContext` (setzt auch `allocation` aus dem Wert) → `computeScores` →
+   `classifyAction` → `buildInsights` → Ranking → KPIs, Risiko, Einkommen, Termine,
+   gewichteter CAGR → `buildRecommendations`.
+4. Neue CSV wird mit Dateiname/Datum in `localStorage` (`incomeLense.csv`) gespeichert,
+   Einstellungen in `incomeLense.settings` (Monatsziel, Sparrate, Budget, ausgeschlossene Werte).
+   Beim Start wird beides wiederhergestellt. Papierkorb-Button löscht die CSV.
 
 ---
 
-## 4. Tabs (Navigation)
+## 4. Navigation & UI-Architektur
 
-Sticky Tab-Leiste; es ist immer **genau eine** Ansicht sichtbar
-(`showView(id)` toggelt `.view.active`). Reihenfolge logisch gruppiert:
-Überblick/Empfehlung → Analyse → Aktions-Tools → Daten.
+**7 Tabs** als Links mit Hash-Routing; `route()` zeigt genau eine View:
 
-| # | Tab | View-ID | Renderer | Inhalt |
-|---|-----|---------|----------|--------|
-| 1 | Übersicht | `view-overview` | `renderKpis` | 12 KPI-Karten (Depotwert, investiert, G/V abs. & %, Brutto-Div. p.a./Monat, gew. Rendite, gew. YoC, #aktiv, #Zahler, größte Position, größter Zahler) |
-| 2 | Handlungsempfehlungen | `view-recommendations` | `renderRecommendations` | priorisierte, individuelle Empfehlungen (s. §7) |
-| 3 | Allokation | `view-charts` | `renderCharts` | 7 Chart.js-Diagramme (Sektor/Land/Art/Währung, Top-10 Wert, Top-10 Dividende, Div.-Beitrag/Sektor) |
-| 4 | Risiko | `view-risk` | `renderRisk` | Konzentrationskennzahlen + Warnungen (s. §6) |
-| 5 | Einkommensprognose | `view-income` | `renderIncome` | Brutto/Netto, Steuer, Netto-Rendite/YoC, Monatsbalken, 5-Jahres-Hochrechnung |
-| – | Zieldepot 2033 | `view-target` | `renderTarget` | Netto-Projektion bis 2033 vs. Monatsziel; Einmalbetrag + Sparrate; Lücke pro Wert nach Score; Sparraten-Szenario (`STATE.targetSavings`) + „Besparen"-Schalter je Wert (`STATE.targetExcluded`) für Live-Szenarien (`computeTarget`, `TARGET_YEAR`) |
-| 6 | Dividendenkalender | `view-calendar` | `renderCalendar` | Monatsverteilung + kommende Termine |
-| 7 | Aufstockplan | `view-topup` | `renderTopUp` | 1.000-€-Tranchen-Plan (s. §8) |
-| 8 | Einordnung | `view-actions` | `renderActionIdeas` | Gruppierung aller Werte in Aktionskategorien |
-| 9 | Positionen | `view-table` | `renderTable` | sortier-/filterbare Tabelle |
-| 10 | Detailanalyse | `view-details` | `renderDetailCards` | Master-Detail: Liste links, Detailkarte rechts |
-| 11 | Inaktiv | `view-inactive` | `renderInactive` | nur sichtbar, wenn inaktive Werte vorhanden (Nav-Button `#navInactive`) |
+| Tab | Hash | Renderer | Inhalt |
+|---|---|---|---|
+| Übersicht | `#uebersicht` | `renderOverview` | Hero (Depotwert, Dividenden), 6 Kennzahlen, Karten Handlungsbedarf / Nächste Zahlungen / Ziel |
+| Empfehlungen | `#empfehlungen` | `renderRecs` | Filter-Chips nach Priorität, Empfehlungskarten mit „Details“ |
+| Risiko | `#risiko` | `renderRisk` | Kennzahlen + Balken (Positionen, Dividenden, Sektoren mit Umschalter, Länder, Art, Währung) |
+| Einkommen | `#einkommen` | `renderIncome` | Kennzahlen, Monatsbalken netto+Steuer, Hochrechnung, Termine nach Monat |
+| Ziel 2033 | `#ziel` | `renderTarget` | Ziel-Chips + Eingabe, Sparrate, Fortschritts-Meter, Kennzahlen, Tabelle mit Schaltern |
+| Aufstocken | `#aufstocken` | `renderTopUp` | Budget-Chips + Eingabe, Verteilung, Tranchen (aufklappbar) |
+| Positionen | `#positionen` | `renderPositions` | Suche, Sektor/Land/Sortierung, Kategorie-Chips (ersetzt „Einordnung“ und „Inaktiv“) |
 
-**Charts-Hinweis:** Diagramme werden bei verstecktem Container erstellt; beim
-Wechsel auf „Allokation" ruft `showView` `chart.resize()` auf (sonst Größe 0).
+- **Detail-Sheet:** `#<tab>/<SYMBOL>` öffnet ein natives `<dialog>` (Mobile: Bottom-Sheet,
+  Desktop: Seitenpanel). ‹ › / Pfeiltasten blättern nach Score (`location.replace`), Esc/Backdrop
+  schließen; Zurück-Taste schließt ebenfalls (`sheetFromNav`).
+- **Lazy Rendering:** Eine View wird erst beim ersten Öffnen gerendert (`STATE.rendered`);
+  Einstellungen invalidieren gezielt (z. B. Ziel → Übersicht).
+- **Event-Delegation:** je ein Listener für click / input / change / drag; Registries
+  `ACTIONS`, `CHIP_GROUPS`, `INPUTS`.
+
+### Wiederverwendbare Komponenten (`app.js` + `styles.css`)
+`stat` (Kennzahl-Kachel, `hero`-Variante) · `bars` (Balkenliste, auch gestapelt) · `meter`
+(Fortschritt) · `chips` (Filter/Vorauswahl, `aria-pressed`) · `tag` / `scorePill` / `actionTag` ·
+`legend` / `limitLegend` · `scoreRing` · `.rtable` (Tabelle am Desktop, zweizeilige Liste
+≤ 720 px via `c-main` / `c-score` / `c-key` / `c-br` / `data-label`) · `.card` · `.method`
+(`<details>` für Methodik) · `.switch`.
+
+**Farbregel:** Farbe nur mit Bedeutung. `tone-green|blue|orange|ochre|red|faint` setzen `--tone`;
+Score-Skala: ≥ 70 grün, ≥ 55 blau, ≥ 40 orange, < 40 rot. Schwere: hoch rot, mittel orange,
+Chance grün, Hinweis blau. Zahlen bleiben in Textfarbe (Ausnahme: G/V mit Vorzeichen).
+
+**Zahlenformat:** Kennzahlen, Balken, Projektionen in ganzen Euro; Tabellen und Detailkarte
+mit Cent. Fehlende Werte → `–`.
 
 ---
 
-## 5. Scoring-Modell (`scoring.js`)
+## 5. Zentrale Schwellen (`LIMITS` in `scoring.js`)
 
-Transparent & regelbasiert, jede Regel kommentiert. Gewichte in `SCORE_WEIGHTS`
-(leicht anpassbar):
-
-| Block | Gewicht | Funktion |
+| Schwelle | mittel | hoch |
 |---|---|---|
-| Sicherheit / Dividendenqualität | 30 % | `scoreSafety` |
-| Einkommensstärke | 25 % | `scoreIncome` |
-| Wachstum | 20 % | `scoreGrowth` |
-| Depot-Fit | 15 % | `scoreFit` |
-| Konzentrationsrisiko (hoch = sicher) | 10 % | `scoreConcentration` |
+| Einzelwert-Gewicht | > 5 % | > 8 % |
+| Sektor (benannt) | > 20 % | > 25 % |
+| Land (benannt) | > 45 % | > 60 % |
+| Anteil an den Dividenden | > 6 % | > 10 % |
 
-`computeScores(pos, ctx)` → `{safety, income, growth, fit, concentration, total}`.
-`interpretScore(total)` → Label + CSS-Klasse (85+ Sehr stark … <40 Kritisch).
-`scoreColor(score)` → Grün/Teal/Orange/Rot.
+Dazu: hohe Rendite > 8 % (entschärft ab CAGR ≥ 5 %), Buchverlust ≤ −15 %,
+< 12 effektive Positionen, Mindest-Score für Aufstocken 62.
+Diese Werte gelten **identisch** in Scoring, Risiko-Balken, Empfehlungen, Einordnung, Insights
+und Aufstockplan.
 
----
-
-## 6. Risiko & Konzentration (`renderRisk` / `computeRisk` in `app.js`)
-
-- **Kennzahlen:** Diversifikations-Score (0–100), effektive Positionsanzahl (1/HHI),
-  Top-5/Top-10-Anteil, größte Position/Sektor/Land, größter Dividendenzahler.
-- **HHI/Effektivanzahl** via `hhi()` / `effectiveCount()`.
-- **Warnungen** (`flags`, Schwere Hoch/Mittel): Einzelposition >5 %/>8 %,
-  Sektor >20 %/>30 %, Land >45 %/>60 %, Einkommens­konzentration >6 %/>10 %,
-  Renditefallen (dy>8 % + schwacher/negativer CAGR), geringe effektive Streuung.
-- **`isGeneric()`**: `mixed`/`Unbekannt` (breite ETFs) gelten als diversifiziert und
-  werden **nicht** als Einzelrisiko gewertet.
-- Darstellung: CSS-Balken (`concBars`), **kein Chart.js** (vermeidet Hidden-Canvas-Probleme).
+**Breite ETFs/Fonds** (`isDiversified`: ETF/Fonds mit Sektor oder Land „mixed“/unbekannt)
+zählen nicht als Einzelwert- oder Einkommensklumpen. Generische Buckets (`mixed`, `Unbekannt`)
+fließen nie als Sektor-/Länderrisiko ein (`bucketShare`).
 
 ---
 
-## 7. Handlungsempfehlungen (`buildRecommendations` / `renderRecommendations`)
+## 6. Scoring (`scoring.js`)
 
-Synthese der gesamten Analyse zu **individuellen, priorisierten** Empfehlungen.
-Objektform: `{ sev, cat, title, text }`.
-
-- **Schweregrade:** `high` (Hoch), `mid` (Mittel), `low` (Chance), `info` (Hinweis).
-- **Kategorien:** Diversifizieren, Reduzieren, Risiko, Beobachten, Einkommen,
-  Aufstocken, Hinweis.
-- **Regeln:** Länder-/Sektor-/Einkommensklumpen; Übergewichtungen; kritische Scores
-  (<40, **außer** dividendenlose Werte); Renditefallen; rückläufige Dividenden;
-  deutliche Buchverluste (gainRel ≤ −15 % bei Dividendenwert); Top-Aufstock-Chancen
-  (aus dem Aufstock-Qualitätsmodell).
-- **Dividendenlose Werte** (Krypto, thesaurierende ETFs, `totalDividendRate ≤ 0`)
-  werden **gebündelt als ein blauer „Hinweis"** ausgegeben statt als „kritischer Score".
-- Dedupliziert nach Titel, sortiert nach Schwere. Wortwahl bewusst nicht-beratend.
+Gewichte `SCORE_WEIGHTS`: Sicherheit 30 %, Einkommen 25 %, Wachstum 20 %, Depot-Fit 15 %,
+Streuung 10 % (hoch = geringes Konzentrationsrisiko). `scoreLevel(score)` liefert Label + Ton
+für Pill, Ring, Balken und Diversifikations-Score.
 
 ---
 
-## 8. Aufstockplan (`buildTopUpPlan` / `renderTopUp`)
+## 7. Einordnung (`classifyAction`) – konsistent mit dem Aufstockplan
 
-Ziel-Gewichtungs-Modell (Water-Filling), nicht greedy-pauschal:
+Reihenfolge: inaktiv → **Reduzieren prüfen** (Einzelwert > 8 % + schwache Signale) →
+**Nicht aufstocken** (Einzelwert > 5 % + schwache Signale/Score < 55) → **Beobachten** bei
+Buchverlust ≤ −15 % → Nicht-Zahler → **Halten** → **Beobachten** bei Renditefalle/-warnung,
+negativem CAGR oder fehlenden Daten → **Aufstocken** wenn `topUpProfile` existiert →
+Halten (Score ≥ 62) bzw. Beobachten.
 
-1. **Qualität (0–1)** je Wert aus Ranking + Diversifikation + Wachstum + Rendite
-   (`topUpQuality`, Gewichte in `TOPUP_WEIGHTS`).
-2. **Zielgewicht (Soft-Cap):** `TOPUP_SOFT_MIN`(2 %)…`TOPUP_SOFT_MAX`(6 %) je nach
-   Qualität; harte Grenze `TOPUP_HARD_CAP` (8 %).
-3. **Eligibility-Gates** (`topUpEligible`): Score ≥ 55, kein 8 %-Bruch, keine
-   Renditefalle, Sektor ≤ 25 %, kein negativer CAGR, Einkommensanteil ≤ 10 %.
-4. **Verteilung:** Budget proportional zu *Attraktivität* = Qualität × Untergewichtung,
-   iterativ, gedeckelt; gedeckelte Werte geben Rest ab.
-5. **Tranchen:** €-Ziele werden als **1.000-€-Tranchen** ausgegeben (jeweils der Wert
-   mit dem größten Abstand zu seinem €-Ziel). Pro Tranche werden Allokation & Ranking
-   neu berechnet → Begründung („Wieso?") inkl. Rang im Depot.
-- **Preset-Budget:** 3.000 €. Skaliert automatisch: kleine Budgets → Top-Kandidaten,
-  große Budgets → breite, proportionale Streuung mit Mehrfach-Tranchen.
+**Regel:** Kategorie „Aufstocken“ = exakt die Kandidaten des Aufstockplans; jedes
+Beobachten-Signal sperrt Aufstockungen. Die „Chance“-Empfehlungen sind die attraktivsten
+dieser Kandidaten.
 
 ---
 
-## 9. Einordnung & Insights (`insights.js`)
+## 8. Empfehlungen (`buildRecommendations`)
 
-- `ACTION_CATEGORIES`: add / hold / monitor / noadd / reduce / inactive
-  (Labels, Beschreibungen, CSS-Klassen).
-- `classifyAction(pos, scores, ctx)` ordnet jede Position genau einer Kategorie zu.
-- `buildInsights(pos, scores, ctx)` erzeugt 3–6 deutsche Insight-Sätze pro Position
-  (in der Detailanalyse sichtbar).
-
----
-
-## 10. Dividendenkalender & Einkommensprognose (`app.js`)
-
-Geteilte Helfer: `paymentsPerYear`, `payMonths`, `monthIndexOf`, `parseISODate`,
-`computeIncomeDistribution` (Monatsverteilung brutto/netto), `upcomingPayments`.
-
-- **Kalender:** erwartete Bruttoausschüttung je Kalendermonat (Anker = Monat aus
-  `payDate`, verteilt nach Frequenz), stärkster Monat, nächster Zahltag, Summe der
-  nächsten 30 Tage, Tabelle kommender Termine.
-- **Prognose:** Netto = brutto × (1 − `taxRate`); effektiver Steuersatz, Netto-Rendite,
-  Netto-YoC; Monats-Balken (Netto grün / Steuer blass); 5-Jahres-Hochrechnung mit
-  einkommensgewichtetem Dividenden-CAGR.
+Eine Liste für alle Hinweise (die früheren separaten Risiko-Warnungen sind hier aufgegangen).
+Objekt `{ sev, cat, title, text, symbol? }`, Schweregrade `SEVERITY` (hoch/mittel/Chance/Hinweis).
+Kategorien: Diversifizieren, Konzentration, Reduzieren, Risiko, Beobachten, Einkommen,
+Aufstocken, Hinweis. Dedupliziert nach Titel, stabil nach Schwere sortiert.
 
 ---
 
-## 11. Formatierung (`formatting.js`)
+## 9. Aufstockplan (`buildTopUpPlan`)
 
-- `parseNum` – Komma-Dezimal-Parsing (Kernstück des CSV-Imports).
-- `hasNum`/`num0` – Validitäts-/Fallback-Helfer.
-- `fmtCurrency`, `fmtPercent`, `fmtNumber`, `fmtSignedCurrency`, `fmtSignedPercent` (de-DE).
-- `fmtFrequency`, `fmtSecurityType`, `fmtCountry`, `fmtText`, `fmtDate`.
-- Fehlende Werte → `n/a` (es werden **keine** Werte erfunden).
-
----
-
-## 12. Deployment (GitHub Pages)
-
-1. Alle Dateien liegen im Repo-Root (insb. `index.html`).
-2. **Settings → Pages → Deploy from a branch**, Branch wählen, Ordner `/ (root)`.
-3. Generierte URL öffnen. Nach Updates ggf. Hard-Refresh (Cache-Busting `?v=N` hilft).
+1. Kandidaten über `topUpProfile` (Gates + Qualität 0–1 + Zielgewicht 2–6 %, harte Grenze 8 %).
+2. Water-Filling: Budget proportional zu Qualität × Untergewichtung, gedeckelt.
+3. 1.000-€-Tranchen an den Wert mit dem größten Abstand zum €-Ziel; nach jeder Tranche
+   werden Anteile, Scores und Rang neu berechnet („Wieso?“).
+Ergebnis `{ tranches, perPosition, candidateCount }`; in `STATE.topUp` je Tranchenzahl gecacht.
 
 ---
 
-## 13. Tests / lokale Vorschau
+## 10. Einkommen & Ziel 2033
 
-- **Logik-Test (Node):** `formatting.js`/`scoring.js`/`insights.js` lassen sich per
-  `eval` in Node laden (keine DOM-Abhängigkeit auf Top-Level).
-- **Browser-Test:** mit Playwright/Chromium headless. **Achtung:** In der Sandbox sind
-  die CDN-Hosts (jsdelivr, Google Fonts) gesperrt. Zum Testen wurden lokale npm-Kopien
-  von `papaparse`/`chart.js` verwendet und im Test-`index.html` die CDN-URLs ersetzt.
-  Produktiv/auf GitHub Pages funktioniert das CDN normal (Fonts fallen sonst auf
-  System-Fonts zurück – kein Funktionsfehler).
-- `app.js` referenziert `document` nur innerhalb von Event-Handlern/Render-Funktionen,
-  daher kein Top-Level-DOM-Zugriff beim Laden.
+- **Verteilung:** nächster `payDate` als Anker, weitere Zahlungen nach Frequenz. Jahressummen
+  (brutto/netto) zählen alle Zahler – überall identisch.
+- **Netto** = brutto × (1 − `taxRate`). Hochrechnung mit einkommensgewichtetem CAGR.
+- **Ziel 2033** (`computeTarget`): organische Projektion je Wert (CAGR 0–15 %), Lücke nach Score
+  auf besparte Werte verteilt, Einmalbetrag aus Netto-Rendite/Wachstum je Wert, Sparrate als
+  Annuität (Ø-Wachstum ≤ 12 %), Sparraten-Szenario zur Depot-Netto-Rendite.
 
 ---
 
-## 14. Designentscheidungen / Konventionen
+## 11. Tests / lokale Vorschau
 
-- **Keine Anlageberatung:** durchgehend abwägende Wortwahl; Hinweise auf allen
-  „Aktions"-Tabs.
-- **CSV-only (V1):** keine externen Fundamentaldaten (Payout Ratio, FCF, Debt/EBITDA,
-  Dividenden-Streak, Ratings). Fehlt etwas → `n/a`.
-- **Risiko-/Empfehlungs-Tabs** nutzen bewusst CSS-Balken statt Chart.js (Robustheit).
-- **Globale Funktionen** (kein Bundler) – Reihenfolge der `<script>`-Tags ist relevant.
-
----
-
-## 15. Mögliche nächste Schritte (V2-Ideen)
-
-- **Rebalancing/Reduzieren-Tab** (Gegenstück zum Aufstockplan – noch offen).
-- **Performance-Tab** (Gewinner/Verlierer, gainPrev/Tagesveränderung).
-- **API-Anreicherung** (Financial Modeling Prep / Alpha Vantage / EODHD) für echte
-  Fundamentaldaten → bessere Sicherheits-/Qualitäts-Scores.
-- **Persistenz der gewählten Ansicht** (z. B. URL-Hash `#risiko`).
-- **Konfigurierbare Parameter in der UI** (Score-/Aufstock-Gewichte, Zielband).
-- **CSV-Reset/Mehrfach-Vergleich**, Export der Empfehlungen (PDF/CSV).
+- **Logik (Node):** `formatting.js`, `scoring.js`, `insights.js`, `analysis.js` per `vm` in einen
+  Kontext laden, `parseCsv` + `analyze` mit einer Test-CSV ausführen.
+- **Browser:** Playwright/Chromium headless. Keine CDN-Abhängigkeiten mehr nötig.
+- **Lint:** alle Skripte zu einem Bundle verketten und mit ESLint (`no-undef`, `no-unused-vars`)
+  als Script prüfen.
 
 ---
 
-## 16. Änderungshistorie (Kurzfassung)
+## 12. Konventionen
 
-1. V1-Grundgerüst: Parsing, KPIs, Charts, Tabelle, Detailkarten, Scoring, Insights,
-   Einordnung, Inaktiv-Bereich, README.
-2. Sticky Tab-Navigation (Single-View-Umschaltung).
-3. Rebrand „Income Lense"; Score-Kreis-Hintergrund entfernt; CSV-Hinweis aus Übersicht;
-   Cache-Busting eingeführt.
-4. Währungs-Chart; Detailanalyse als Master-Detail.
-5. Aufstockplan (Tranchen) – zunächst greedy, dann Preset 3.000 € + Ziel-Gewichtungs-
-   Modell (Water-Filling, granular).
-6. Risiko-Tab.
-7. Dividendenkalender & Einkommensprognose.
-8. Handlungsempfehlungen-Tab.
-9. Header: Untertitel entfernt, Upload als Icon.
-10. Einheitliche deutsche Tab-Namen + logische Reihenfolge; „Info & Grenzen" entfernt;
-    dividendenlose Werte als Hinweis.
-11. Vereinfachter Empty-State.
-12. V2-Experiment: externe Fundamentaldaten (FMP/EODHD) in der Detailanalyse –
-    nach Tests wieder **entfernt** (statische App + CORS/Plan-Limits). Die App ist
-    wieder vollständig CSV-only.
+- Keine Anlageberatung: abwägende Wortwahl; Disclaimer im Footer, Details in „Methodik“.
+- CSV-only: fehlende Werte → `–`, nichts wird erfunden.
+- Mobile first: 16-px-Eingaben (kein iOS-Zoom), Ziele ≥ 34 px, keine horizontale Seitenscroll.
+- Barrierefreiheit: sichtbarer Fokus, `aria-current`/`aria-pressed`, Dialog mit Fokus-Management,
+  `prefers-reduced-motion`, Kontraste ≥ 4,5:1 für Text.
 
-> Hinweis: Die Modell-ID des verwendeten Assistenten ist bewusst **nicht** in
-> Code/Artefakten hinterlegt.
+---
+
+## 13. Änderungshistorie (Kurzfassung)
+
+1. V1-Grundgerüst: Parsing, KPIs, Charts, Tabelle, Detailkarten, Scoring, Insights, Einordnung.
+2. Tabs, Rebrand „Income Lense“, Master-Detail, Aufstockplan (Water-Filling), Risiko-Tab,
+   Kalender & Prognose, Handlungsempfehlungen, Zieldepot 2033.
+3. V2-Experiment externe Fundamentaldaten – wieder entfernt (CSV-only).
+4. **Audit-Überarbeitung:** 12 → 7 Tabs; Detail als Sheet von überall; responsive Tabellen;
+   Chart.js, PapaParse und Google Fonts entfernt (eigener CSV-Parser, CSS-Balken, Systemschrift);
+   zentrale `LIMITS`; breite ETFs nicht mehr als Klumpen; Einordnung = Aufstockplan-Kandidaten;
+   Hash-Routing, lokale Speicherung, Drag & Drop, Lazy Rendering; Fixes: verdeckte Tab-Leiste,
+   mobiler Overflow, iOS-Zoom, Tastaturzugang, Score-Farben, Texte.
+
+> Hinweis: Die Modell-ID des verwendeten Assistenten ist bewusst **nicht** in Code/Artefakten
+> hinterlegt.
