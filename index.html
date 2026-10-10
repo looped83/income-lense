@@ -2,383 +2,304 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="description" content="Lokale Analyse deines DivvyDiary-Dividendendepots: Scores, Risiko, Einkommen, Ziel 2033 und Aufstockplan. Die CSV verlässt dein Gerät nicht." />
   <title>Income Lense</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=26" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232ecc71'/%3E%3Cpath d='M8 21l5-5 4 3 7-8' fill='none' stroke='%2306231a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <!-- ?v= busts browser / GitHub Pages caches when files change. -->
+  <link rel="stylesheet" href="styles.css?v=27" />
+  <script defer src="formatting.js?v=27"></script>
+  <script defer src="scoring.js?v=27"></script>
+  <script defer src="insights.js?v=27"></script>
+  <script defer src="analysis.js?v=27"></script>
+  <script defer src="app.js?v=27"></script>
 </head>
 <body>
-  <!-- ============================ HEADER ============================ -->
   <header class="app-header">
-    <div class="header-inner">
-      <div class="header-text">
-        <h1>Income Lense</h1>
+    <div class="wrap header-inner">
+      <div class="brand">
+        <span class="brand-name">Income Lense</span>
+        <span class="brand-meta" id="fileMeta"></span>
       </div>
       <div class="header-actions">
-        <label class="upload-btn" title="DivvyDiary-CSV laden" aria-label="DivvyDiary-CSV laden">
-          <input type="file" id="csvFile" accept=".csv,text/csv" hidden />
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        </label>
+        <button type="button" class="icon-btn" data-action="clear" id="clearData" hidden aria-label="Gespeicherte Daten löschen" title="Gespeicherte Daten löschen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></svg>
+        </button>
+        <button type="button" class="icon-btn icon-btn-primary" data-action="upload" aria-label="DivvyDiary-CSV laden" title="DivvyDiary-CSV laden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+        </button>
+        <input type="file" id="csvFile" accept=".csv,text/csv" hidden />
       </div>
     </div>
   </header>
 
-  <!-- ============================ NAVIGATION ============================ -->
-  <!-- Sticky tab navigation. Each entry shows one section ("page") at a time. -->
-  <nav id="mainNav" class="main-nav hidden" aria-label="Bereichsnavigation">
-    <div class="main-nav-inner">
-      <button type="button" class="nav-item active" data-view="view-overview">Übersicht</button>
-      <button type="button" class="nav-item" data-view="view-recommendations">Handlungsempfehlungen</button>
-      <button type="button" class="nav-item" data-view="view-charts">Allokation</button>
-      <button type="button" class="nav-item" data-view="view-risk">Risiko</button>
-      <button type="button" class="nav-item" data-view="view-income">Einkommensprognose</button>
-      <button type="button" class="nav-item" data-view="view-target">Zieldepot 2033</button>
-      <button type="button" class="nav-item" data-view="view-calendar">Dividendenkalender</button>
-      <button type="button" class="nav-item" data-view="view-topup">Aufstockplan</button>
-      <button type="button" class="nav-item" data-view="view-actions">Einordnung</button>
-      <button type="button" class="nav-item" data-view="view-table">Positionen</button>
-      <button type="button" class="nav-item" data-view="view-details">Detailanalyse</button>
-      <button type="button" class="nav-item hidden" id="navInactive" data-view="view-inactive">Inaktiv</button>
+  <nav class="tabs" id="tabs" hidden aria-label="Bereiche">
+    <div class="wrap tabs-inner">
+      <a class="tab" href="#uebersicht" data-view="uebersicht">Übersicht</a>
+      <a class="tab" href="#empfehlungen" data-view="empfehlungen">Empfehlungen</a>
+      <a class="tab" href="#risiko" data-view="risiko">Risiko</a>
+      <a class="tab" href="#einkommen" data-view="einkommen">Einkommen</a>
+      <a class="tab" href="#ziel" data-view="ziel">Ziel 2033</a>
+      <a class="tab" href="#aufstocken" data-view="aufstocken">Aufstocken</a>
+      <a class="tab" href="#positionen" data-view="positionen">Positionen</a>
     </div>
   </nav>
 
-  <main class="container">
-    <div id="errorBox" class="error-box hidden"></div>
+  <main class="wrap">
+    <p id="errorBox" class="notice tone-red" role="alert" hidden></p>
 
-    <!-- ====================== EMPTY STATE ====================== -->
-    <section id="emptyState" class="empty-state">
-      <div class="empty-card">
-        <div class="empty-icon">📊</div>
-        <h2>DivvyDiary-CSV laden</h2>
-        <button type="button" class="empty-upload" onclick="document.getElementById('csvFile').click()">
-          CSV auswählen
-        </button>
+    <!-- ============================ EMPTY STATE ============================ -->
+    <section id="emptyState" class="empty" hidden>
+      <div class="dropzone">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M12 18v-6M9 15l3-3 3 3" /></svg>
+        <h1>DivvyDiary-CSV laden</h1>
+        <p>Datei hierher ziehen oder auswählen.</p>
+        <button type="button" class="btn btn-primary" data-action="upload">CSV auswählen</button>
+        <p class="privacy-note">Die Analyse läuft komplett in deinem Browser. Die Datei wird nur lokal gespeichert und lässt sich jederzeit löschen.</p>
       </div>
     </section>
 
-    <!-- ====================== DASHBOARD ====================== -->
-    <div id="dashboard" class="hidden">
+    <!-- ============================ ÜBERSICHT ============================ -->
+    <section class="view" id="view-uebersicht" hidden aria-labelledby="h-uebersicht">
+      <header class="view-head">
+        <h1 id="h-uebersicht">Übersicht</h1>
+      </header>
+      <div class="stats stats-hero" id="ovHero"></div>
+      <div class="stats section" id="ovStats"></div>
+      <div class="grid grid-3" id="ovCards"></div>
+    </section>
 
-      <!-- KPI CARDS -->
-      <section class="block view active" id="view-overview">
-        <h2 class="block-title">Portfolio-Übersicht</h2>
-        <div id="kpiGrid" class="kpi-grid"></div>
-      </section>
+    <!-- ============================ EMPFEHLUNGEN ============================ -->
+    <section class="view" id="view-empfehlungen" hidden aria-labelledby="h-empfehlungen">
+      <header class="view-head">
+        <h1 id="h-empfehlungen">Empfehlungen</h1>
+        <p class="lead">Alle Hinweise zu deinem Depot – priorisiert, inklusive Risiken.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body" id="recMethod"></div></details>
+      </header>
+      <div class="chips chips-scroll" data-chips="rec" id="recFilter" role="group" aria-label="Nach Priorität filtern"></div>
+      <div class="stack section" id="recList"></div>
+    </section>
 
-      <!-- RECOMMENDATIONS -->
-      <section class="block view" id="view-recommendations">
-        <h2 class="block-title">Handlungsempfehlungen</h2>
-        <p class="block-note">
-          Individuelle, priorisierte Empfehlungen für dein Depot – abgeleitet aus Scores,
-          Konzentration, Wachstum und Einkommen. Wortwahl bewusst abwägend; <strong>keine Anlageberatung.</strong>
-        </p>
-        <div id="recSummary" class="topup-summary"></div>
-        <div id="recList" class="rec-list"></div>
-      </section>
+    <!-- ============================ RISIKO ============================ -->
+    <section class="view" id="view-risiko" hidden aria-labelledby="h-risiko">
+      <header class="view-head">
+        <h1 id="h-risiko">Risiko</h1>
+        <p class="lead">Konzentration und Allokation deines Depots.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body">
+          <p><strong>Effektive Positionen</strong> = 1 / Summe der quadrierten Gewichte (HHI): So viele gleich große Werte hätten dieselbe Konzentration.</p>
+          <p><strong>Diversifikation (0–100)</strong>: 35 % Positionsstreuung, 25 % größter Sektor, 20 % größtes Land, 20 % Streuung der Dividenden.</p>
+          <p>„Gemischt (ETFs)“ steht für breit streuende ETFs/Fonds; sie zählen nicht als Einzelrisiko. Orange und Rot markieren die Warnschwellen.</p>
+        </div></details>
+      </header>
+      <div class="stats stats-4" id="riskStats"></div>
+      <div class="grid">
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Positionen nach Gewicht</h2><span id="legendPosition"></span></div>
+          <div id="riskPositions"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Anteil an den Dividenden</h2><span id="legendIncome"></span></div>
+          <div id="riskPayers"></div>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <h2 class="card-title">Sektoren</h2>
+            <div class="chips chips-sm" data-chips="sectorMetric" role="group" aria-label="Sektoren gewichten nach">
+              <button type="button" class="chip" data-value="value" aria-pressed="true">Depotwert</button>
+              <button type="button" class="chip" data-value="income" aria-pressed="false">Dividenden</button>
+            </div>
+          </div>
+          <div id="riskSectors"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Länder</h2><span id="legendCountry"></span></div>
+          <div id="riskCountries"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Wertpapierart</h2></div>
+          <div id="riskTypes"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Dividendenwährung</h2></div>
+          <div id="riskCurrencies"></div>
+        </article>
+      </div>
+    </section>
 
-      <!-- CHARTS -->
-      <section class="block view" id="view-charts">
-        <h2 class="block-title">Allokation</h2>
-        <div class="chart-grid">
-          <div class="chart-card">
-            <h3>Allokation nach Sektor</h3>
-            <div class="chart-wrap"><canvas id="chartSector"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Allokation nach Land</h3>
-            <div class="chart-wrap"><canvas id="chartCountry"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Allokation nach Wertpapierart</h3>
-            <div class="chart-wrap"><canvas id="chartType"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Allokation nach Währung</h3>
-            <div class="chart-wrap"><canvas id="chartCurrency"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Top 10 Positionen nach Marktwert</h3>
-            <div class="chart-wrap"><canvas id="chartTopValue"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Top 10 Positionen nach jährlicher Dividende</h3>
-            <div class="chart-wrap"><canvas id="chartTopDiv"></canvas></div>
-          </div>
-          <div class="chart-card">
-            <h3>Dividendenbeitrag nach Sektor</h3>
-            <div class="chart-wrap"><canvas id="chartDivSector"></canvas></div>
-          </div>
-        </div>
-      </section>
+    <!-- ============================ EINKOMMEN ============================ -->
+    <section class="view" id="view-einkommen" hidden aria-labelledby="h-einkommen">
+      <header class="view-head">
+        <h1 id="h-einkommen">Einkommen</h1>
+        <p class="lead">Dividenden brutto und netto, Monatsverteilung, Prognose und Termine.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body">
+          <p><strong>Netto</strong> = brutto × (1 − taxRate aus der CSV), ohne Sparer-Pauschbetrag.</p>
+          <p><strong>Monatsverteilung</strong>: Die CSV enthält nur den nächsten Zahltag je Wert; die übrigen Zahlungen werden ab diesem Monat nach Frequenz verteilt.</p>
+          <p><strong>Hochrechnung</strong> mit dem einkommensgewichteten Dividenden-CAGR. Vergangene Wachstumsraten sind keine Garantie.</p>
+        </div></details>
+      </header>
+      <div class="stats stats-4" id="incStats"></div>
+      <div class="grid">
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Dividende pro Monat</h2><span id="legendMonths"></span></div>
+          <div id="incMonths"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><h2 class="card-title">Hochrechnung netto p.a.</h2><span class="card-note" id="incCagrNote"></span></div>
+          <div id="incProjection"></div>
+        </article>
+      </div>
+      <article class="card section">
+        <div class="card-head"><h2 class="card-title">Kommende Zahlungen</h2><span class="card-note">brutto, je nächster Termin</span></div>
+        <div id="incUpcoming"></div>
+      </article>
+    </section>
 
-      <!-- RISK & CONCENTRATION -->
-      <section class="block view" id="view-risk">
-        <h2 class="block-title">Risiko &amp; Konzentration</h2>
-        <p class="block-note">
-          Konzentrations- und Klumpenrisiken deines Depots auf Basis der CSV. „Gemischt" steht für
-          breit streuende ETFs/Fonds und wird nicht als Einzelrisiko gewertet. <strong>Keine Anlageberatung.</strong>
-        </p>
-        <div id="riskKpis" class="kpi-grid"></div>
-
-        <h3 class="risk-subtitle">Risiko-Hinweise</h3>
-        <div id="riskFlags" class="risk-flags"></div>
-
-        <div class="risk-detail-grid">
-          <div class="risk-block">
-            <h3>Top-Positionen nach Gewicht</h3>
-            <div id="riskTopPositions" class="conc-list"></div>
-          </div>
-          <div class="risk-block">
-            <h3>Einkommens-Konzentration (Dividendenzahler)</h3>
-            <div id="riskIncome" class="conc-list"></div>
-          </div>
-          <div class="risk-block">
-            <h3>Sektor-Allokation</h3>
-            <div id="riskSectors" class="conc-list"></div>
-          </div>
-          <div class="risk-block">
-            <h3>Länder-Allokation</h3>
-            <div id="riskCountries" class="conc-list"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- DIVIDEND CALENDAR -->
-      <section class="block view" id="view-calendar">
-        <h2 class="block-title">Dividendenkalender</h2>
-        <p class="block-note">
-          Erwartete <strong>Bruttoausschüttung je Monat</strong> auf Basis von Zahltermin (payDate) und
-          Frequenz aus der CSV. Da nur der nächste Termin je Position vorliegt, werden die übrigen
-          Zahlungen anhand der Frequenz auf das Jahr verteilt. <strong>Keine Anlageberatung.</strong>
-        </p>
-        <div id="calendarKpis" class="kpi-grid"></div>
-
-        <div class="cal-section">
-          <h3 class="risk-subtitle">Erwartete Ausschüttung pro Monat (brutto)</h3>
-          <div id="calMonths" class="cal-months"></div>
-        </div>
-
-        <div class="cal-section">
-          <h3 class="risk-subtitle">Kommende Termine</h3>
-          <div class="table-scroll">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Ex-Tag</th>
-                  <th>Zahltag</th>
-                  <th>Symbol</th>
-                  <th>Name</th>
-                  <th>Frequenz</th>
-                  <th class="t-num">Betrag (Zahlung)</th>
-                </tr>
-              </thead>
-              <tbody id="calUpcoming"></tbody>
-            </table>
+    <!-- ============================ ZIEL 2033 ============================ -->
+    <section class="view" id="view-ziel" hidden aria-labelledby="h-ziel">
+      <header class="view-head">
+        <h1 id="h-ziel">Ziel 2033</h1>
+        <p class="lead">Projektion deiner Netto-Dividende im Vergleich zu deinem Monatsziel.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body">
+          <p><strong>Projektion</strong>: nur organisch – jeder Wert wächst mit seinem eigenen Dividenden-CAGR (0–15 % gedeckelt), ohne Zukäufe.</p>
+          <p><strong>Lücke</strong>: wird nach Score auf die besparten Werte verteilt; das Kapital je Wert ergibt sich aus seiner Netto-Rendite und seinem Wachstum.</p>
+          <p><strong>Sparrate</strong>: Annuität mit dem Ø-Dividendenwachstum (max. 12 %), investiert zur Netto-Rendite des Depots. Vereinfachte Annahmen.</p>
+        </div></details>
+      </header>
+      <div class="controls">
+        <div class="control">
+          <span class="control-label" id="lblTarget">Monatsziel netto</span>
+          <div class="control-row">
+            <div class="chips" data-chips="target" role="group" aria-labelledby="lblTarget">
+              <button type="button" class="chip" data-value="2000" aria-pressed="false">2.000 €</button>
+              <button type="button" class="chip" data-value="3500" aria-pressed="false">3.500 €</button>
+            </div>
+            <span class="input-wrap"><input type="number" id="targetInput" class="input" inputmode="numeric" min="0" step="100" aria-labelledby="lblTarget" /><span class="suffix">€</span></span>
           </div>
         </div>
-      </section>
-
-      <!-- INCOME PROJECTION -->
-      <section class="block view" id="view-income">
-        <h2 class="block-title">Einkommensprognose</h2>
-        <p class="block-note">
-          Brutto- und <strong>Nettodividende</strong> (nach Steuer gemäß taxRate aus der CSV) sowie eine
-          Hochrechnung mit dem einkommensgewichteten Dividenden-CAGR. Steuerliche Vereinfachung ohne
-          Sparer-Pauschbetrag – <strong>keine Steuer- oder Anlageberatung.</strong>
-        </p>
-        <div id="incomeKpis" class="kpi-grid"></div>
-
-        <div class="cal-section">
-          <h3 class="risk-subtitle">Monatliche Dividende: netto (grün) vs. brutto</h3>
-          <div id="incomeMonths" class="cal-months"></div>
+        <div class="control">
+          <label class="control-label" for="savingsInput">Sparrate (Szenario)</label>
+          <div class="control-row">
+            <span class="input-wrap input-wrap-wide"><input type="number" id="savingsInput" class="input" inputmode="numeric" min="0" step="50" placeholder="0" /><span class="suffix">€ / Monat</span></span>
+          </div>
         </div>
+      </div>
+      <article class="card" id="targetProgress"></article>
+      <div class="stats section" id="targetStats"></div>
+      <article class="card card-flush section">
+        <div class="card-pad">
+          <h2 class="card-title">Was pro Wert fehlt</h2>
+          <p class="card-note" id="targetNote"></p>
+        </div>
+        <table class="rtable">
+          <thead>
+            <tr>
+              <th><span class="sr-only">Besparen</span></th>
+              <th>Wert</th>
+              <th class="num">Zusatz-Kapital</th>
+              <th class="num">Netto heute</th>
+              <th class="num">Netto 2033</th>
+              <th class="num">Zusatz-Div. p.a.</th>
+              <th class="num">Score</th>
+            </tr>
+          </thead>
+          <tbody id="targetBody"></tbody>
+        </table>
+      </article>
+    </section>
 
-        <div class="cal-section">
-          <h3 class="risk-subtitle">Hochrechnung jährliche Nettodividende <span id="incomeCagr" class="risk-subtitle-note"></span></h3>
-          <div id="incomeProjection" class="cal-months"></div>
-          <p class="block-note">
-            Annahme: konstantes Dividendenwachstum auf Basis des historischen, einkommensgewichteten
-            CAGR. Vergangene Wachstumsraten sind keine Garantie für die Zukunft.
-          </p>
+    <!-- ============================ AUFSTOCKEN ============================ -->
+    <section class="view" id="view-aufstocken" hidden aria-labelledby="h-aufstocken">
+      <header class="view-head">
+        <h1 id="h-aufstocken">Aufstocken</h1>
+        <p class="lead">Verteilung deines Budgets in 1.000-€-Tranchen.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body" id="topupMethod"></div></details>
+      </header>
+      <div class="controls">
+        <div class="control">
+          <span class="control-label" id="lblBudget">Budget</span>
+          <div class="control-row">
+            <div class="chips" data-chips="budget" role="group" aria-labelledby="lblBudget">
+              <button type="button" class="chip" data-value="1000" aria-pressed="false">1.000 €</button>
+              <button type="button" class="chip" data-value="3000" aria-pressed="false">3.000 €</button>
+              <button type="button" class="chip" data-value="5000" aria-pressed="false">5.000 €</button>
+              <button type="button" class="chip" data-value="10000" aria-pressed="false">10.000 €</button>
+            </div>
+            <span class="input-wrap"><input type="number" id="budgetInput" class="input" inputmode="numeric" min="1000" step="1000" aria-labelledby="lblBudget" /><span class="suffix">€</span></span>
+          </div>
         </div>
-      </section>
+      </div>
+      <article class="card" id="topupSummary"></article>
+      <div class="stack section" id="topupTranches"></div>
+    </section>
 
-      <!-- TARGET PORTFOLIO 2033 -->
-      <section class="block view" id="view-target">
-        <h2 class="block-title">Zieldepot 2033</h2>
-        <p class="block-note">
-          Projektion deiner <strong>Netto</strong>-Dividende bis 2033 – nur aus dem
-          Dividendenwachstum deiner bestehenden Werte, ohne neue Käufe – im Vergleich zu deinem
-          Monatsziel. „Was fehlt" wird nach Qualitäts-Score auf die Werte verteilt. Vereinfachte
-          Annahmen, <strong>keine Anlageberatung.</strong>
-        </p>
-        <div class="target-controls">
-          <span class="target-label">Monatsziel (netto):</span>
-          <button type="button" class="target-btn" data-target="3500">3.500 €</button>
-          <button type="button" class="target-btn" data-target="2000">2.000 €</button>
-          <label class="target-custom">eigenes:
-            <input type="number" id="targetCustom" class="ctrl" min="0" step="100" placeholder="€/Monat" />
-          </label>
-        </div>
-        <div class="target-controls">
-          <span class="target-label">Sparraten-Szenario:</span>
-          <label class="target-custom">Sparrate (€/Mon):
-            <input type="number" id="targetSavings" class="ctrl" min="0" step="50" placeholder="z. B. 500" />
-          </label>
-          <span id="targetSavingsResult" class="target-savings-result"></span>
-        </div>
-        <div id="targetSummary" class="block-note"></div>
-        <div id="targetKpis" class="kpi-grid"></div>
-
-        <h3 class="risk-subtitle">Was pro Wert fehlt (Aufteilung nach Score)</h3>
-        <div class="table-count" id="targetCount"></div>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th class="t-num">Netto-Div. p.a. heute</th>
-                <th class="t-num">Projektion 2033</th>
-                <th class="t-num">Zusatz-Div. nötig p.a.</th>
-                <th class="t-num">Zusatz-Kapital</th>
-                <th class="t-num">Score</th>
-                <th>Besparen</th>
-              </tr>
-            </thead>
-            <tbody id="targetBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- ACTION IDEAS -->
-      <section class="block view" id="view-actions">
-        <h2 class="block-title">Einordnung der Werte</h2>
-        <p class="block-note">
-          Gruppierung als Orientierung – <strong>keine Anlageberatung</strong>. Für eine genauere
-          Entscheidung wären zusätzliche Fundamentaldaten nötig.
-        </p>
-        <div id="actionIdeas" class="action-grid"></div>
-      </section>
-
-      <!-- TOP-UP PLAN (1.000 € tranches) -->
-      <section class="block view" id="view-topup">
-        <h2 class="block-title">Aufstockplan (1.000-€-Tranchen)</h2>
-        <p class="block-note">
-          Vorschlag, welche Werte du auf Basis der Analyse als Nächstes aufstocken könntest –
-          aufgeteilt in Tranchen von je 1.000 €. Aus deiner CSV, dem Score-Ranking und der
-          Gewichtung der Kennzahlen wird je Wert ein qualitätsabhängiges <strong>Zielgewicht</strong>
-          abgeleitet; das Budget wird dann proportional zu Qualität und Untergewichtung über mehrere
-          Werte verteilt. <strong>Keine Anlageberatung.</strong>
-        </p>
-        <div class="topup-controls">
-          <label class="topup-field">
-            <span>Geplantes Budget (€)</span>
-            <input type="number" id="topupBudget" class="ctrl" min="1000" step="1000" value="3000" />
-          </label>
-          <div class="topup-summary" id="topupSummary"></div>
-        </div>
-        <div id="topupPlan" class="topup-plan"></div>
-        <div id="topupAgg" class="topup-agg"></div>
-      </section>
-
-      <!-- POSITION TABLE -->
-      <section class="block view" id="view-table">
-        <h2 class="block-title">Positionsübersicht</h2>
-        <div class="table-controls">
-          <input type="text" id="searchInput" class="ctrl" placeholder="Suche: Symbol, Name oder ISIN" />
-          <select id="sectorFilter" class="ctrl"></select>
-          <select id="countryFilter" class="ctrl"></select>
-          <select id="actionFilter" class="ctrl"></select>
-          <select id="sortSelect" class="ctrl">
-            <option value="value">Sortieren: Marktwert</option>
-            <option value="dividend">Sortieren: Jährliche Dividende</option>
-            <option value="allocation">Sortieren: Depotanteil</option>
-            <option value="yield">Sortieren: Dividendenrendite</option>
-            <option value="cagr">Sortieren: Dividenden-CAGR</option>
-            <option value="score">Sortieren: Score</option>
-          </select>
-        </div>
-        <div class="table-count" id="tableCount"></div>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th class="t-num">Wert</th>
-                <th class="t-num">Anteil</th>
-                <th class="t-num">G/V %</th>
-                <th class="t-num">Div.-Rendite</th>
-                <th class="t-num">Yield on Cost</th>
-                <th class="t-num">Jährl. Div.</th>
-                <th class="t-num">Div.-CAGR</th>
-                <th class="t-num">Score</th>
-                <th>Aktion</th>
-              </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- DETAILED POSITION ANALYSIS (master-detail) -->
-      <section class="block view" id="view-details">
-        <h2 class="block-title">Detaillierte Positionsanalyse</h2>
-        <div class="detail-layout">
-          <!-- Left: selectable list of all active positions -->
-          <aside class="detail-list" id="detailList" aria-label="Positionsliste"></aside>
-          <!-- Right: details of the selected position -->
-          <div class="detail-panel" id="detailPanel"></div>
-        </div>
-      </section>
-
-      <!-- INACTIVE SECTION -->
-      <section id="view-inactive" class="block view">
-        <h2 class="block-title">Inaktiv / Sold / Watchlist <span class="count-badge" id="inactiveCount">0</span></h2>
-        <p class="block-note">
-          Positionen mit Marktwert = 0 werden aus den aktiven Portfolio-Berechnungen ausgeschlossen
-          und hier separat gelistet.
-        </p>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th>ISIN</th>
-                <th>Sektor</th>
-                <th>Land</th>
-                <th>Art</th>
-                <th class="t-num">Div.-Rendite</th>
-                <th>Frequenz</th>
-              </tr>
-            </thead>
-            <tbody id="inactiveBody"></tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+    <!-- ============================ POSITIONEN ============================ -->
+    <section class="view" id="view-positionen" hidden aria-labelledby="h-positionen">
+      <header class="view-head">
+        <h1 id="h-positionen">Positionen</h1>
+        <p class="lead">Alle Werte mit Score und Einordnung. Tippe auf einen Wert für die Detailanalyse.</p>
+        <details class="method"><summary>Methodik</summary><div class="method-body">
+          <p><strong>Score (0–100)</strong> = 30 % Sicherheit + 25 % Einkommen + 20 % Wachstum + 15 % Depot-Fit + 10 % Streuung. Jede Regel ist transparent und basiert nur auf der CSV.</p>
+          <p><strong>Einordnung</strong>: jeder Wert genau einer Kategorie. „Aufstocken“ entspricht exakt den Kandidaten des Aufstockplans.</p>
+        </div></details>
+      </header>
+      <div class="toolbar">
+        <input type="search" id="posSearch" class="input" placeholder="Symbol, Name oder ISIN" aria-label="Positionen durchsuchen" />
+        <select id="posSector" class="input" aria-label="Sektor"></select>
+        <select id="posCountry" class="input" aria-label="Land"></select>
+        <select id="posSort" class="input" aria-label="Sortierung">
+          <option value="value">Marktwert</option>
+          <option value="score">Score</option>
+          <option value="dividend">Dividende p.a.</option>
+          <option value="yield">Rendite</option>
+          <option value="cagr">Dividenden-CAGR</option>
+          <option value="gain">G/V %</option>
+        </select>
+      </div>
+      <div class="chips chips-scroll" data-chips="action" id="posChips" role="group" aria-label="Nach Einordnung filtern"></div>
+      <p class="card-note list-note" id="posNote"></p>
+      <article class="card card-flush">
+        <table class="rtable">
+          <thead>
+            <tr>
+              <th>Wert</th>
+              <th class="num">Marktwert</th>
+              <th class="num">Anteil</th>
+              <th class="num">G/V</th>
+              <th class="num">Rendite</th>
+              <th class="num">YoC</th>
+              <th class="num">Div. p.a.</th>
+              <th class="num">CAGR</th>
+              <th class="num">Score</th>
+              <th>Einordnung</th>
+            </tr>
+          </thead>
+          <tbody id="posBody"></tbody>
+        </table>
+      </article>
+    </section>
   </main>
 
+  <!-- ============================ DETAIL SHEET ============================ -->
+  <dialog id="sheet" class="sheet" aria-labelledby="sheetTitle">
+    <div class="sheet-bar">
+      <button type="button" class="icon-btn" data-action="sheet-prev" aria-label="Vorheriger Wert (nach Score)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      </button>
+      <button type="button" class="icon-btn" data-action="sheet-next" aria-label="Nächster Wert (nach Score)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+      </button>
+      <span class="sheet-pos" id="sheetPos"></span>
+      <button type="button" class="icon-btn" data-action="sheet-close" aria-label="Schließen" autofocus>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
+      </button>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </dialog>
+
   <footer class="app-footer">
-    <p>Income Lense · CSV-basierte Depotanalyse · Keine Anlageberatung</p>
+    Income Lense · lokale CSV-Analyse · Keine Anlage-, Steuer- oder Rechtsberatung
   </footer>
-
-  <!-- ====================== DEPENDENCIES (CDN) ====================== -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <!-- ====================== APP MODULES ====================== -->
-  <!-- ?v= query string busts browser / GitHub Pages caches when files change. -->
-  <script src="formatting.js?v=26"></script>
-  <script src="scoring.js?v=26"></script>
-  <script src="insights.js?v=26"></script>
-  <script src="app.js?v=26"></script>
 </body>
 </html>
