@@ -1,1785 +1,1053 @@
 /* ============================================================================
- * app.js
+ * app.js — UI controller
  * ----------------------------------------------------------------------------
- * Main application controller for the Dividend Portfolio Analyzer.
- *
- * Responsibilities:
- *   - Parse the DivvyDiary CSV (semicolon-separated, comma decimals) via PapaParse
- *   - Compute portfolio-level KPIs (all derived from the CSV, nothing hardcoded)
- *   - Build allocation context for the scoring model
- *   - Render KPI cards, charts (Chart.js), the position table, detail cards,
- *     action ideas and the inactive section
- *
- * Loaded as a plain global script (no ES modules) so the app runs by simply
- * opening index.html — locally or on GitHub Pages.
+ * Routing (#view, #view/SYMBOL opens the detail sheet), local persistence,
+ * event delegation, reusable HTML components and the view renderers.
+ * Views render lazily on first visit; every number comes from analysis.js.
  * ==========================================================================*/
 
-// Global app state.
+const VIEWS = ['uebersicht', 'empfehlungen', 'risiko', 'einkommen', 'ziel', 'aufstocken', 'positionen'];
+const STORE_CSV = 'incomeLense.csv';
+const STORE_SETTINGS = 'incomeLense.settings';
+const DEFAULTS = { target: 3500, savings: 0, budget: 3000 };
+const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const DAY_MS = 864e5;
+
 const STATE = {
-  positions: [], // all parsed positions
-  active: [], // value > 0
-  inactive: [], // value === 0
-  ctx: null, // portfolio context for scoring
-  kpis: null,
-  charts: {}, // Chart.js instances (so we can destroy/rebuild)
-  detailSelected: null, // currently selected symbol in the detail tab
-  targetMonthly: 3500, // Zieldepot 2033: net monthly dividend goal (€)
-  targetExcluded: new Set(), // Zieldepot: symbols excluded from new investments
-  targetSavings: 0, // Zieldepot: savings-rate scenario (€/month)
+  data: null, // result of analyze()
+  meta: null, // { name, savedAt } of the loaded CSV
+  settings: { ...DEFAULTS, excluded: new Set() },
+  ui: { view: null, rec: 'all', action: 'active', sectorMetric: 'value' },
+  rendered: new Set(), // views rendered for the current data
+  topUp: null, // cached plan { count, plan }
+  sheetSymbol: null,
+  sheetFromNav: false, // sheet entry was pushed by in-app navigation
 };
 
-// Zieldepot 2033 configuration.
-const TARGET_YEAR = 2033;
-
-// CSV columns we read (kept for reference / documentation).
-const NUMERIC_FIELDS = [
-  'quantity', 'buyin', 'buyinTotal', 'price', 'value', 'gain', 'gainRel',
-  'allocation', 'allocationOnBuyin', 'dividendYield', 'dividendYieldOnBuyin',
-  'totalDividendRate', 'dividendRate', 'dividendCagr', 'gainPrev', 'gainPrevRel',
-  'taxRate',
-];
+const $ = (id) => document.getElementById(id);
 
 /* ----------------------------------------------------------------------------
- * Bootstrapping
+ * Persistence (best effort: private mode / quota errors are ignored)
  * --------------------------------------------------------------------------*/
-document.addEventListener('DOMContentLoaded', () => {
-  const fileInput = document.getElementById('csvFile');
-  if (fileInput) fileInput.addEventListener('change', onFileSelected);
-
-  // Wire up filter / sort controls (they no-op until data is loaded).
-  ['searchInput', 'sectorFilter', 'countryFilter', 'actionFilter', 'sortSelect'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', renderTable);
-  });
-
-  // Top-up plan recomputes when the budget changes.
-  const budget = document.getElementById('topupBudget');
-  if (budget) budget.addEventListener('input', renderTopUp);
-
-  // Zieldepot 2033: target preset buttons + custom input.
-  document.querySelectorAll('.target-btn').forEach((b) => {
-    b.addEventListener('click', () => {
-      STATE.targetMonthly = parseInt(b.dataset.target, 10) || 3500;
-      const ci = document.getElementById('targetCustom');
-      if (ci) ci.value = '';
-      renderTarget();
-    });
-  });
-  const targetCustom = document.getElementById('targetCustom');
-  if (targetCustom)
-    targetCustom.addEventListener('input', () => {
-      const v = parseInt(targetCustom.value, 10);
-      if (Number.isFinite(v) && v > 0) {
-        STATE.targetMonthly = v;
-        renderTarget();
-      }
-    });
-
-  // Zieldepot 2033: savings-rate scenario (what you'd reach with €/month).
-  const targetSavings = document.getElementById('targetSavings');
-  if (targetSavings)
-    targetSavings.addEventListener('input', () => {
-      const v = parseFloat(targetSavings.value);
-      STATE.targetSavings = Number.isFinite(v) && v > 0 ? v : 0;
-      renderTarget();
-    });
-
-  setupNav();
-});
-
-/* ----------------------------------------------------------------------------
- * Navigation: each nav item shows exactly one "page" (view) at a time.
- * --------------------------------------------------------------------------*/
-function setupNav() {
-  document.querySelectorAll('.nav-item').forEach((btn) => {
-    btn.addEventListener('click', () => showView(btn.dataset.view));
-  });
-}
-
-/** Show a single view by id and mark the matching nav item active. */
-function showView(viewId) {
-  document.querySelectorAll('.view').forEach((v) => {
-    v.classList.toggle('active', v.id === viewId);
-  });
-  document.querySelectorAll('.nav-item').forEach((b) => {
-    b.classList.toggle('active', b.dataset.view === viewId);
-  });
-
-  // Charts are created while their container may be hidden (zero size). When the
-  // charts view becomes visible, resize them so they fill their cards correctly.
-  if (viewId === 'view-charts') {
-    Object.values(STATE.charts).forEach((c) => c && c.resize());
+function readStore(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
   }
-  // Jump back to the top so each "page" starts at its heading.
-  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function writeStore(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage unavailable – the app still works for this session */
+  }
+}
+
+function restoreSettings() {
+  const saved = readStore(STORE_SETTINGS) || {};
+  const s = STATE.settings;
+  for (const key in DEFAULTS) if (Number.isFinite(saved[key]) && saved[key] >= 0) s[key] = saved[key];
+  s.excluded = new Set(Array.isArray(saved.excluded) ? saved.excluded : []);
+}
+
+function saveSettings() {
+  const s = STATE.settings;
+  writeStore(STORE_SETTINGS, { target: s.target, savings: s.savings, budget: s.budget, excluded: [...s.excluded] });
 }
 
 /* ----------------------------------------------------------------------------
- * CSV loading & parsing
+ * Bootstrapping & data loading
  * --------------------------------------------------------------------------*/
-function onFileSelected(evt) {
-  const file = evt.target.files && evt.target.files[0];
-  if (!file) return;
-
-  Papa.parse(file, {
-    header: true,
-    delimiter: ';',
-    skipEmptyLines: true,
-    transformHeader: (h) => h.trim(),
-    complete: (results) => {
-      try {
-        handleParsedData(results.data);
-      } catch (err) {
-        console.error(err);
-        showError('Beim Verarbeiten der CSV ist ein Fehler aufgetreten: ' + err.message);
-      }
-    },
-    error: (err) => {
-      console.error(err);
-      showError('CSV konnte nicht gelesen werden: ' + err.message);
-    },
-  });
+function boot() {
+  restoreSettings();
+  bindEvents();
+  const saved = readStore(STORE_CSV);
+  if (saved && saved.text) loadCsv(saved.text, saved.meta, false);
+  renderChrome();
+  route(false);
 }
 
-/** Convert a raw CSV row into a typed position object. */
-function buildPosition(row) {
-  const pos = {
-    symbol: (row.symbol || '').trim(),
-    isin: (row.isin || '').trim(),
-    wkn: (row.wkn || '').trim(),
-    name: (row.name || '').trim(),
-    currency: (row.currency || '').trim(),
-    dividendFrequency: (row.dividendFrequency || '').trim(),
-    dividendCagrPeriod: (row.dividendCagrPeriod || '').trim(),
-    sector: (row.sector || '').trim() || 'Unbekannt',
-    securityType: (row.securityType || '').trim(),
-    country: (row.country || '').trim() || 'Unbekannt',
-    originalDividendCurrency: (row.originalDividendCurrency || '').trim(),
-    exDate: (row.exDate || '').trim(),
-    payDate: (row.payDate || '').trim(),
-    note: (row.note || '').trim(),
-  };
-
-  // Parse numeric fields (comma decimal handled by parseNum).
-  NUMERIC_FIELDS.forEach((f) => {
-    pos[f] = parseNum(row[f]);
-  });
-
-  // A position is "active" when it has a market value > 0.
-  pos.isActive = hasNum(pos.value) && pos.value > 0;
-  return pos;
+/** Parse + analyse a CSV. isNew: persist it and reset per-file settings. */
+function loadCsv(text, meta, isNew) {
+  let data;
+  try {
+    const positions = parseCsv(text).filter((r) => r.symbol || r.isin).map(buildPosition);
+    if (!positions.length) throw new Error('Keine Positionen gefunden.');
+    data = analyze(positions);
+  } catch (err) {
+    console.error(err);
+    showError(`Die CSV konnte nicht verarbeitet werden: ${err.message}`);
+    return false;
+  }
+  if (isNew) {
+    STATE.settings.excluded.clear();
+    saveSettings();
+    writeStore(STORE_CSV, { text, meta });
+  }
+  Object.assign(STATE, { data, meta, topUp: null });
+  STATE.rendered.clear();
+  STATE.ui.view = null;
+  showError('');
+  fillPositionFilters();
+  return true;
 }
 
-function handleParsedData(rows) {
-  const positions = rows
-    .filter((r) => r && (r.symbol || r.isin))
-    .map(buildPosition);
+function readFile(file) {
+  file.text().then(
+    (text) => {
+      if (!loadCsv(text, { name: file.name, savedAt: Date.now() }, true)) return;
+      history.replaceState(null, '', '#' + VIEWS[0]);
+      renderChrome();
+      route(false);
+    },
+    (err) => showError(`Die Datei konnte nicht gelesen werden: ${err.message}`)
+  );
+}
 
-  if (positions.length === 0) {
-    showError('Keine Positionen in der CSV gefunden.');
+function clearData() {
+  if (!confirm('Gespeicherte Depotdaten aus diesem Browser löschen?')) return;
+  writeStore(STORE_CSV, null);
+  Object.assign(STATE, { data: null, meta: null, topUp: null });
+  STATE.rendered.clear();
+  STATE.ui.view = null;
+  history.replaceState(null, '', location.pathname + location.search);
+  renderChrome();
+  route(false);
+}
+
+function showError(msg) {
+  const box = $('errorBox');
+  box.textContent = msg;
+  box.hidden = !msg;
+}
+
+/** Header, tabs and empty state depend only on whether data is loaded. */
+function renderChrome() {
+  const has = !!STATE.data;
+  document.body.classList.toggle('has-data', has);
+  $('emptyState').hidden = has;
+  $('tabs').hidden = !has;
+  $('clearData').hidden = !has;
+  $('fileMeta').textContent =
+    has && STATE.meta ? `${STATE.meta.name} · ${new Date(STATE.meta.savedAt).toLocaleDateString('de-DE')}` : '';
+  if (!has) for (const v of VIEWS) $('view-' + v).hidden = true;
+}
+
+/* ----------------------------------------------------------------------------
+ * Routing: #view or #view/SYMBOL
+ * --------------------------------------------------------------------------*/
+function parseHash() {
+  const [view, symbol] = location.hash.slice(1).split('/');
+  return { view, symbol: symbol ? decodeURIComponent(symbol) : null };
+}
+
+function route(fromNav) {
+  const sheet = $('sheet');
+  if (!STATE.data) {
+    if (sheet.open) sheet.close();
     return;
   }
-
-  STATE.positions = positions;
-  STATE.active = positions.filter((p) => p.isActive);
-  STATE.inactive = positions.filter((p) => !p.isActive);
-
-  // Reset Zieldepot scenario state for the new CSV.
-  STATE.targetExcluded = new Set();
-
-  // Build portfolio context + KPIs from the ACTIVE positions only.
-  STATE.ctx = buildContext(STATE.active);
-  STATE.kpis = computeKpis(STATE.active);
-
-  // Compute scores, insights and action category per position.
-  positions.forEach((p) => {
-    p.scores = computeScores(p, STATE.ctx);
-    p.insights = buildInsights(p, p.scores, STATE.ctx);
-    p.action = classifyAction(p, p.scores, STATE.ctx);
-  });
-
-  // Reveal the dashboard + navigation and render everything.
-  document.getElementById('emptyState').classList.add('hidden');
-  document.getElementById('dashboard').classList.remove('hidden');
-  document.getElementById('mainNav').classList.remove('hidden');
-
-  populateFilters();
-  renderKpis();
-  renderCharts();
-  renderRecommendations();
-  renderRisk();
-  renderCalendar();
-  renderIncome();
-  renderTarget();
-  renderTable();
-  renderDetailCards();
-  renderActionIdeas();
-  renderTopUp();
-  renderInactive();
-
-  // Always start on the overview "page".
-  showView('view-overview');
+  const { view, symbol } = parseHash();
+  showView(VIEWS.includes(view) ? view : VIEWS[0]);
+  if (symbol) openSheet(symbol, fromNav);
+  else if (sheet.open) sheet.close();
 }
 
-/* ----------------------------------------------------------------------------
- * Portfolio context (aggregates for the scoring model)
- * --------------------------------------------------------------------------*/
-function buildContext(active) {
-  const totalValue = active.reduce((s, p) => s + num0(p.value), 0);
-  const totalAnnualDividend = active.reduce((s, p) => s + num0(p.totalDividendRate), 0);
-
-  // Sector & country allocation as fractions of total portfolio value.
-  const sectorValue = {};
-  const countryValue = {};
-  active.forEach((p) => {
-    sectorValue[p.sector] = (sectorValue[p.sector] || 0) + num0(p.value);
-    countryValue[p.country] = (countryValue[p.country] || 0) + num0(p.value);
-  });
-
-  const sectorAllocation = {};
-  Object.keys(sectorValue).forEach((k) => {
-    sectorAllocation[k] = totalValue > 0 ? sectorValue[k] / totalValue : 0;
-  });
-  const countryAllocation = {};
-  Object.keys(countryValue).forEach((k) => {
-    countryAllocation[k] = totalValue > 0 ? countryValue[k] / totalValue : 0;
-  });
-
-  return {
-    totalValue,
-    totalAnnualDividend,
-    sectorAllocation,
-    countryAllocation,
-  };
-}
-
-/* ----------------------------------------------------------------------------
- * KPI computation (everything derived from the CSV)
- * --------------------------------------------------------------------------*/
-function computeKpis(active) {
-  const totalValue = active.reduce((s, p) => s + num0(p.value), 0);
-  const totalInvested = active.reduce((s, p) => s + num0(p.buyinTotal), 0);
-  const totalGain = active.reduce((s, p) => s + num0(p.gain), 0);
-  const annualDividend = active.reduce((s, p) => s + num0(p.totalDividendRate), 0);
-
-  const gainRel = totalInvested > 0 ? totalGain / totalInvested : NaN;
-  const monthlyDividend = annualDividend / 12;
-  const weightedYield = totalValue > 0 ? annualDividend / totalValue : NaN;
-  const weightedYoc = totalInvested > 0 ? annualDividend / totalInvested : NaN;
-
-  const dividendPayers = active.filter((p) => num0(p.totalDividendRate) > 0);
-
-  // Largest position by value.
-  let largest = null;
-  active.forEach((p) => {
-    if (!largest || num0(p.value) > num0(largest.value)) largest = p;
-  });
-  // Largest dividend payer by annual dividend.
-  let largestPayer = null;
-  active.forEach((p) => {
-    if (!largestPayer || num0(p.totalDividendRate) > num0(largestPayer.totalDividendRate)) {
-      largestPayer = p;
+function showView(view) {
+  if (STATE.ui.view === view) return;
+  STATE.ui.view = view;
+  for (const v of VIEWS) $('view-' + v).hidden = v !== view;
+  for (const tab of document.querySelectorAll('.tab')) {
+    if (tab.dataset.view !== view) {
+      tab.removeAttribute('aria-current');
+      continue;
     }
-  });
+    tab.setAttribute('aria-current', 'page');
+    const bar = tab.parentElement;
+    bar.scrollLeft = tab.offsetLeft - bar.offsetLeft - (bar.clientWidth - tab.offsetWidth) / 2;
+  }
+  if (!STATE.rendered.has(view)) {
+    RENDER[view]();
+    STATE.rendered.add(view);
+  }
+  window.scrollTo(0, 0);
+}
 
-  return {
-    totalValue,
-    totalInvested,
-    totalGain,
-    gainRel,
-    annualDividend,
-    monthlyDividend,
-    weightedYield,
-    weightedYoc,
-    activeCount: active.length,
-    payerCount: dividendPayers.length,
-    largest,
-    largestPayer,
-  };
+/** Link target that opens the detail sheet on top of the current view. */
+function detailHref(symbol) {
+  return `#${STATE.ui.view}/${encodeURIComponent(symbol)}`;
 }
 
 /* ----------------------------------------------------------------------------
- * KPI rendering
+ * Events (delegated: one listener per event type)
  * --------------------------------------------------------------------------*/
-function renderKpis() {
-  const k = STATE.kpis;
-  const grid = document.getElementById('kpiGrid');
+const ACTIONS = {
+  upload: () => $('csvFile').click(),
+  clear: clearData,
+  'sheet-prev': () => stepSheet(-1),
+  'sheet-next': () => stepSheet(1),
+  'sheet-close': () => $('sheet').close(),
+};
 
-  const cards = [
-    { label: 'Depotwert', value: fmtCurrency(k.totalValue), accent: 'neutral' },
-    { label: 'Investiertes Kapital', value: fmtCurrency(k.totalInvested), accent: 'neutral' },
-    {
-      label: 'Unrealisiertes Plus/Minus',
-      value: fmtSignedCurrency(k.totalGain),
-      accent: k.totalGain >= 0 ? 'pos' : 'neg',
-    },
-    {
-      label: 'Unrealisiertes Plus/Minus %',
-      value: fmtSignedPercent(k.gainRel),
-      accent: k.gainRel >= 0 ? 'pos' : 'neg',
-    },
-    { label: 'Jährliche Bruttodividende', value: fmtCurrency(k.annualDividend), accent: 'income' },
-    { label: 'Monatliche Bruttodividende', value: fmtCurrency(k.monthlyDividend), accent: 'income' },
-    { label: 'Gewichtete Dividendenrendite', value: fmtPercent(k.weightedYield), accent: 'income' },
-    { label: 'Gewichteter Yield on Cost', value: fmtPercent(k.weightedYoc), accent: 'income' },
-    { label: 'Anzahl aktiver Positionen', value: fmtNumber(k.activeCount, 0), accent: 'neutral' },
-    { label: 'Anzahl Dividendenzahler', value: fmtNumber(k.payerCount, 0), accent: 'neutral' },
-    {
-      label: 'Größte Position',
-      value: k.largest ? k.largest.symbol : 'n/a',
-      sub: k.largest ? `${fmtCurrency(k.largest.value)} · ${fmtPercent(k.largest.allocation)}` : '',
-      accent: 'neutral',
-    },
-    {
-      label: 'Größter Dividendenzahler',
-      value: k.largestPayer ? k.largestPayer.symbol : 'n/a',
-      sub: k.largestPayer ? `${fmtCurrency(k.largestPayer.totalDividendRate)} / Jahr` : '',
-      accent: 'income',
-    },
-  ];
+const CHIP_GROUPS = {
+  rec: (v) => {
+    STATE.ui.rec = v;
+    renderRecList();
+  },
+  action: (v) => {
+    STATE.ui.action = v;
+    renderPositionRows();
+  },
+  sectorMetric: (v) => {
+    STATE.ui.sectorMetric = v;
+    renderSectorBars();
+  },
+  target: (v) => setSetting('target', Number(v)),
+  budget: (v) => setSetting('budget', Number(v)),
+};
 
-  grid.innerHTML = cards
-    .map(
-      (c) => `
-      <div class="kpi-card kpi-${c.accent}">
-        <div class="kpi-label">${c.label}</div>
-        <div class="kpi-value">${c.value}</div>
-        ${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}
-      </div>`
-    )
-    .join('');
-}
+const INPUTS = {
+  targetInput: debounce((el) => {
+    const v = parseFloat(el.value);
+    if (v > 0) setSetting('target', v);
+  }),
+  savingsInput: debounce((el) => setSetting('savings', Math.max(0, parseFloat(el.value) || 0))),
+  budgetInput: debounce((el) => {
+    const v = parseFloat(el.value);
+    if (v >= TRANCHE_SIZE) setSetting('budget', v);
+  }),
+  posSearch: debounce(() => renderPositionRows(), 120),
+  posSector: () => renderPositionRows(),
+  posCountry: () => renderPositionRows(),
+  posSort: () => renderPositionRows(),
+};
 
-/* ----------------------------------------------------------------------------
- * Charts (Chart.js)
- * --------------------------------------------------------------------------*/
-const CHART_PALETTE = [
-  '#2ecc71', '#3498db', '#9b59b6', '#e67e22', '#1abc9c', '#f1c40f',
-  '#e74c3c', '#16a085', '#2980b9', '#8e44ad', '#d35400', '#27ae60',
-  '#c0392b', '#7f8c8d', '#f39c12', '#34495e',
-];
+function bindEvents() {
+  window.addEventListener('hashchange', () => route(true));
 
-function destroyCharts() {
-  Object.values(STATE.charts).forEach((c) => c && c.destroy());
-  STATE.charts = {};
-}
-
-/** Aggregate active positions' value by a key (e.g. sector / country / type). */
-function aggregateBy(field, valueField = 'value') {
-  const map = {};
-  STATE.active.forEach((p) => {
-    const key = p[field] || 'Unbekannt';
-    map[key] = (map[key] || 0) + num0(p[valueField]);
-  });
-  return map;
-}
-
-/** Convert a {key:value} map into sorted {labels, data} for charts. */
-function toSorted(map, limit) {
-  let entries = Object.entries(map).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  if (limit) entries = entries.slice(0, limit);
-  return { labels: entries.map((e) => e[0]), data: entries.map((e) => e[1]) };
-}
-
-function renderCharts() {
-  destroyCharts();
-  Chart.defaults.color = '#9aa4b2';
-  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
-  Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
-
-  const doughnutOpts = (currency = true) => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'right', labels: { boxWidth: 12, padding: 10 } },
-      tooltip: {
-        callbacks: {
-          label: (c) => {
-            const total = c.dataset.data.reduce((s, v) => s + v, 0);
-            const pct = total > 0 ? c.parsed / total : 0;
-            return ` ${c.label}: ${currency ? fmtCurrency(c.parsed) : fmtNumber(c.parsed)} (${fmtPercent(pct, 1)})`;
-          },
-        },
-      },
-    },
+  $('csvFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) readFile(file);
+    e.target.value = ''; // allow re-selecting the same file
   });
 
-  const barOpts = (currency = true) => ({
-    indexAxis: 'y',
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: (c) => ` ${currency ? fmtCurrency(c.parsed.x) : fmtNumber(c.parsed.x)}`,
-        },
-      },
-    },
-    scales: {
-      x: { ticks: { callback: (v) => fmtNumber(v, 0) }, grid: { color: 'rgba(255,255,255,0.05)' } },
-      y: { grid: { display: false } },
-    },
-  });
-
-  // 1) Allocation by sector
-  const sector = toSorted(aggregateBy('sector'));
-  STATE.charts.sector = new Chart(ctxOf('chartSector'), {
-    type: 'doughnut',
-    data: pieData(sector),
-    options: doughnutOpts(),
-  });
-
-  // 2) Allocation by country
-  const country = toSorted(aggregateBy('country'));
-  STATE.charts.country = new Chart(ctxOf('chartCountry'), {
-    type: 'doughnut',
-    data: pieData(country),
-    options: doughnutOpts(),
-  });
-
-  // 3) Allocation by security type
-  const type = toSorted(aggregateBy('securityType'));
-  type.labels = type.labels.map(fmtSecurityType);
-  STATE.charts.type = new Chart(ctxOf('chartType'), {
-    type: 'doughnut',
-    data: pieData(type),
-    options: doughnutOpts(),
-  });
-
-  // 4) Allocation by currency (underlying / original dividend currency exposure)
-  const currency = toSorted(aggregateBy('originalDividendCurrency'));
-  STATE.charts.currency = new Chart(ctxOf('chartCurrency'), {
-    type: 'doughnut',
-    data: pieData(currency),
-    options: doughnutOpts(),
-  });
-
-  // 5) Top 10 positions by market value
-  const topValue = topPositions('value', 10);
-  STATE.charts.topValue = new Chart(ctxOf('chartTopValue'), {
-    type: 'bar',
-    data: barData(topValue, '#3498db'),
-    options: barOpts(),
-  });
-
-  // 5) Top 10 positions by annual dividend
-  const topDiv = topPositions('totalDividendRate', 10);
-  STATE.charts.topDiv = new Chart(ctxOf('chartTopDiv'), {
-    type: 'bar',
-    data: barData(topDiv, '#2ecc71'),
-    options: barOpts(),
-  });
-
-  // 6) Dividend contribution by sector
-  const divSector = toSorted(aggregateBy('sector', 'totalDividendRate'));
-  STATE.charts.divSector = new Chart(ctxOf('chartDivSector'), {
-    type: 'doughnut',
-    data: pieData(divSector),
-    options: doughnutOpts(),
-  });
-}
-
-function ctxOf(id) {
-  return document.getElementById(id).getContext('2d');
-}
-
-function pieData(agg) {
-  return {
-    labels: agg.labels,
-    datasets: [
-      {
-        data: agg.data,
-        backgroundColor: agg.labels.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]),
-        borderColor: '#161b22',
-        borderWidth: 2,
-      },
-    ],
-  };
-}
-
-/** Build top-N positions {labels, data} for a numeric field. */
-function topPositions(field, n) {
-  const sorted = [...STATE.active]
-    .filter((p) => num0(p[field]) > 0)
-    .sort((a, b) => num0(b[field]) - num0(a[field]))
-    .slice(0, n);
-  return { labels: sorted.map((p) => p.symbol), data: sorted.map((p) => num0(p[field])) };
-}
-
-function barData(agg, color) {
-  return {
-    labels: agg.labels,
-    datasets: [{ data: agg.data, backgroundColor: color, borderRadius: 4 }],
-  };
-}
-
-/* ----------------------------------------------------------------------------
- * Filters
- * --------------------------------------------------------------------------*/
-function populateFilters() {
-  const sectors = [...new Set(STATE.active.map((p) => p.sector))].sort();
-  const countries = [...new Set(STATE.active.map((p) => p.country))].sort();
-
-  fillSelect('sectorFilter', sectors, 'Alle Sektoren');
-  fillSelect('countryFilter', countries, 'Alle Länder', fmtCountry);
-
-  const actionSelect = document.getElementById('actionFilter');
-  actionSelect.innerHTML =
-    '<option value="">Alle Aktionen</option>' +
-    Object.entries(ACTION_CATEGORIES)
-      .map(([k, v]) => `<option value="${k}">${v.label}</option>`)
-      .join('');
-}
-
-function fillSelect(id, values, allLabel, labeller) {
-  const sel = document.getElementById(id);
-  sel.innerHTML =
-    `<option value="">${allLabel}</option>` +
-    values
-      .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(labeller ? labeller(v) : v)}</option>`)
-      .join('');
-}
-
-/* ----------------------------------------------------------------------------
- * Position table (sortable / filterable)
- * --------------------------------------------------------------------------*/
-function renderTable() {
-  if (!STATE.active.length) return;
-  const search = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-  const sectorF = document.getElementById('sectorFilter').value;
-  const countryF = document.getElementById('countryFilter').value;
-  const actionF = document.getElementById('actionFilter').value;
-  const sortBy = document.getElementById('sortSelect').value;
-
-  let rows = STATE.active.filter((p) => {
-    if (sectorF && p.sector !== sectorF) return false;
-    if (countryF && p.country !== countryF) return false;
-    if (actionF && p.action !== actionF) return false;
-    if (search) {
-      const hay = `${p.symbol} ${p.name} ${p.isin}`.toLowerCase();
-      if (!hay.includes(search)) return false;
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    const action = t.closest('[data-action]');
+    if (action) return ACTIONS[action.dataset.action]();
+    const chip = t.closest('.chip');
+    if (chip) {
+      const group = chip.closest('[data-chips]');
+      for (const c of group.querySelectorAll('.chip')) c.setAttribute('aria-pressed', String(c === chip));
+      return CHIP_GROUPS[group.dataset.chips](chip.dataset.value);
     }
-    return true;
+    const row = t.closest('tr[data-open]');
+    if (row && !t.closest('a, button, input, label')) location.hash = detailHref(row.dataset.open);
   });
 
-  const sorters = {
-    value: (a, b) => num0(b.value) - num0(a.value),
-    dividend: (a, b) => num0(b.totalDividendRate) - num0(a.totalDividendRate),
-    allocation: (a, b) => num0(b.allocation) - num0(a.allocation),
-    yield: (a, b) => num0(b.dividendYield) - num0(a.dividendYield),
-    cagr: (a, b) => num0(b.dividendCagr) - num0(a.dividendCagr),
-    score: (a, b) => b.scores.total - a.scores.total,
+  document.addEventListener('input', (e) => INPUTS[e.target.id]?.(e.target));
+
+  // "Besparen" switches in the target table.
+  document.addEventListener('change', (e) => {
+    const symbol = e.target.dataset.exclude;
+    if (symbol === undefined) return;
+    const excluded = STATE.settings.excluded;
+    if (e.target.checked) excluded.delete(symbol);
+    else excluded.add(symbol);
+    saveSettings();
+    renderTarget();
+    STATE.rendered.delete('uebersicht');
+    document.querySelector(`[data-exclude="${CSS.escape(symbol)}"]`)?.focus();
+  });
+
+  // Drag & drop a CSV anywhere on the page.
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.add('is-dragging');
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (!e.relatedTarget) document.body.classList.remove('is-dragging');
+  });
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.remove('is-dragging');
+    const file = e.dataTransfer.files[0];
+    if (file) readFile(file);
+  });
+
+  // Detail sheet: backdrop click closes, arrows browse, closing syncs the URL.
+  const sheet = $('sheet');
+  sheet.addEventListener('click', (e) => {
+    if (e.target === sheet) sheet.close();
+  });
+  sheet.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, select')) return;
+    if (e.key === 'ArrowLeft') stepSheet(-1);
+    if (e.key === 'ArrowRight') stepSheet(1);
+  });
+  sheet.addEventListener('close', () => {
+    const { view, symbol } = parseHash();
+    if (!symbol) return;
+    if (STATE.sheetFromNav) history.back();
+    else history.replaceState(null, '', '#' + view);
+  });
+}
+
+function debounce(fn, ms = 200) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
   };
-  rows.sort(sorters[sortBy] || sorters.value);
+}
 
-  const tbody = document.getElementById('tableBody');
-  tbody.innerHTML = rows
-    .map((p) => {
-      const interp = interpretScore(p.scores.total);
-      const gainCls = num0(p.gainRel) >= 0 ? 'pos' : 'neg';
-      const catLabel = ACTION_CATEGORIES[p.action].label;
-      return `
-      <tr>
-        <td class="t-sym">${escapeHtml(p.symbol)}</td>
-        <td class="t-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
-        <td class="t-num">${fmtCurrency(p.value)}</td>
-        <td class="t-num">${fmtPercent(p.allocation, 1)}</td>
-        <td class="t-num ${gainCls}">${fmtSignedPercent(p.gainRel)}</td>
-        <td class="t-num">${fmtPercent(p.dividendYield)}</td>
-        <td class="t-num">${fmtPercent(p.dividendYieldOnBuyin)}</td>
-        <td class="t-num">${fmtCurrency(p.totalDividendRate)}</td>
-        <td class="t-num">${fmtPercent(p.dividendCagr, 1)}</td>
-        <td class="t-num"><span class="score-pill ${interp.cls}">${p.scores.total}</span></td>
-        <td class="t-action"><span class="action-tag ${ACTION_CATEGORIES[p.action].cls}">${catLabel}</span></td>
-      </tr>`;
-    })
-    .join('');
+function setSetting(key, value) {
+  STATE.settings[key] = value;
+  saveSettings();
+  if (key === 'budget') {
+    renderTopUp();
+  } else {
+    renderTarget();
+    STATE.rendered.delete('uebersicht'); // the overview shows the target progress
+  }
+}
 
-  document.getElementById('tableCount').textContent =
-    `${rows.length} von ${STATE.active.length} aktiven Positionen`;
+/** Sync a preset-chips + free-input control with its value. */
+function syncValueControl(name, value) {
+  const input = $(name + 'Input');
+  if (document.activeElement !== input) input.value = value || '';
+  for (const chip of document.querySelectorAll(`[data-chips="${name}"] .chip`)) {
+    chip.setAttribute('aria-pressed', String(Number(chip.dataset.value) === value));
+  }
 }
 
 /* ----------------------------------------------------------------------------
- * Detailed position analysis (master-detail)
- * Left: a selectable list of positions. Right: details of the selected one.
- * Keeps the page short instead of stacking one big card per position.
+ * Components (HTML strings; callers escape user/CSV text)
  * --------------------------------------------------------------------------*/
-let DETAIL_SORTED = []; // positions in the order shown in the list
-
-function renderDetailCards() {
-  // Sort by total score (strongest first).
-  DETAIL_SORTED = [...STATE.active].sort((a, b) => b.scores.total - a.scores.total);
-  renderDetailList();
-
-  // Keep the current selection if still present, else select the strongest.
-  const keep = STATE.detailSelected && DETAIL_SORTED.some((p) => p.symbol === STATE.detailSelected);
-  if (DETAIL_SORTED.length) selectDetail(keep ? STATE.detailSelected : DETAIL_SORTED[0].symbol);
+function tag(text, tone) {
+  return `<span class="tag tone-${tone}">${text}</span>`;
 }
 
-/** (Re)build the left position list. */
-function renderDetailList() {
-  const list = document.getElementById('detailList');
-  list.innerHTML = DETAIL_SORTED.map(detailListItemHtml).join('');
-  list.querySelectorAll('.detail-list-item').forEach((el) => {
-    el.addEventListener('click', () => selectDetail(el.dataset.symbol));
-    if (STATE.detailSelected) el.classList.toggle('active', el.dataset.symbol === STATE.detailSelected);
-  });
+function scorePill(score) {
+  const l = scoreLevel(score);
+  return `<span class="tag tag-score tone-${l.tone}" title="Score ${score} – ${l.label}">${score}</span>`;
 }
 
-/** A single clickable row in the position list. */
-function detailListItemHtml(p) {
-  const interp = interpretScore(p.scores.total);
-  return `
-    <button type="button" class="detail-list-item" data-symbol="${escapeHtml(p.symbol)}">
-      <span class="dli-main">
-        <span class="dli-sym">${escapeHtml(p.symbol)}</span>
-        <span class="dli-name">${escapeHtml(p.name)}</span>
-      </span>
-      <span class="dli-meta">
-        <span class="dli-value">${fmtCurrency(p.value)}</span>
-        <span class="score-pill ${interp.cls}">${p.scores.total}</span>
-      </span>
-    </button>`;
+function actionTag(key) {
+  const c = ACTION_CATEGORIES[key];
+  return tag(c.label, c.tone);
 }
 
-/** Render the detail panel for the selected symbol and highlight the list row. */
-function selectDetail(symbol) {
-  const p = DETAIL_SORTED.find((x) => x.symbol === symbol);
-  if (!p) return;
-  STATE.detailSelected = symbol;
-  document.querySelectorAll('.detail-list-item').forEach((el) => {
-    el.classList.toggle('active', el.dataset.symbol === symbol);
-  });
-  document.getElementById('detailPanel').innerHTML = detailCardHtml(p);
+function symLink(p) {
+  return `<a class="sym" href="${detailHref(p.symbol)}">${escapeHtml(p.symbol)}</a>`;
 }
 
-function detailCardHtml(p) {
-  const s = p.scores;
-  const interp = interpretScore(s.total);
-  const gainCls = num0(p.gain) >= 0 ? 'pos' : 'neg';
+/** Symbol link + faint name (bar labels, lists). */
+function posLabel(p) {
+  return `${symLink(p)}<span class="faint">${escapeHtml(p.name)}</span>`;
+}
 
-  const dataRow = (label, value) => `
-    <div class="d-row"><span class="d-k">${label}</span><span class="d-v">${value}</span></div>`;
-
-  const scoreBlock = (label, val) => `
-    <div class="score-block">
-      <div class="score-bar-label"><span>${label}</span><span>${val}</span></div>
-      <div class="score-bar"><div class="score-bar-fill" style="width:${val}%;background:${scoreColor(val)}"></div></div>
-    </div>`;
-
-  const insightsHtml = p.insights.map((i) => `<li>${escapeHtml(i)}</li>`).join('');
-
-  return `
-  <div class="detail-card">
-    <div class="dc-header">
-      <div class="dc-id">
-        <div class="dc-sym">${escapeHtml(p.symbol)}
-          <span class="action-tag ${ACTION_CATEGORIES[p.action].cls}">${ACTION_CATEGORIES[p.action].label}</span>
-        </div>
-        <div class="dc-name">${escapeHtml(p.name)}</div>
-        <div class="dc-meta">${escapeHtml(p.isin)} · ${escapeHtml(p.sector)} · ${fmtCountry(p.country)} · ${fmtSecurityType(p.securityType)}</div>
-      </div>
-      <div class="score-circle" style="--clr:${scoreColor(s.total)}">
-        <svg viewBox="0 0 120 120">
-          <!-- No background track ring: only the colored progress arc is drawn. -->
-          <circle class="sc-prog" cx="60" cy="60" r="52"
-            stroke-dasharray="${(s.total / 100) * 326.7} 326.7"></circle>
-        </svg>
-        <div class="sc-text"><span class="sc-num">${s.total}</span><span class="sc-lbl">${interp.label}</span></div>
-      </div>
-    </div>
-
-    <div class="dc-scores">
-      ${scoreBlock('Sicherheit', s.safety)}
-      ${scoreBlock('Einkommen', s.income)}
-      ${scoreBlock('Wachstum', s.growth)}
-      ${scoreBlock('Depot-Fit', s.fit)}
-      ${scoreBlock('Konzentrationsrisiko', s.concentration)}
-    </div>
-
-    <div class="dc-grid">
-      ${dataRow('Aktueller Wert', fmtCurrency(p.value))}
-      ${dataRow('Depotanteil', fmtPercent(p.allocation))}
-      ${dataRow('Investiert (Buy-in)', fmtCurrency(p.buyinTotal))}
-      ${dataRow('Unreal. Plus/Minus', `<span class="${gainCls}">${fmtSignedCurrency(p.gain)}</span>`)}
-      ${dataRow('Unreal. Plus/Minus %', `<span class="${gainCls}">${fmtSignedPercent(p.gainRel)}</span>`)}
-      ${dataRow('Dividendenrendite', fmtPercent(p.dividendYield))}
-      ${dataRow('Yield on Cost', fmtPercent(p.dividendYieldOnBuyin))}
-      ${dataRow('Jährliche Dividende', fmtCurrency(p.totalDividendRate))}
-      ${dataRow('Dividende je Anteil', fmtCurrency(p.dividendRate))}
-      ${dataRow('Frequenz', fmtFrequency(p.dividendFrequency))}
-      ${dataRow('Dividenden-CAGR', `${fmtPercent(p.dividendCagr, 1)} (${fmtText(p.dividendCagrPeriod)})`)}
-      ${dataRow('Ex-Tag', fmtDate(p.exDate))}
-      ${dataRow('Zahltag', fmtDate(p.payDate))}
-    </div>
-
-    <div class="dc-insights">
-      <div class="dc-insights-title">Automatische Insights</div>
-      <ul>${insightsHtml}</ul>
-    </div>
+function stat({ label, value, sub = '', tone = '', hero = false }) {
+  return `<div class="stat${hero ? ' stat-hero' : ''}">
+    <div class="stat-label">${label}</div>
+    <div class="stat-value${tone ? ` tone-text tone-${tone}` : ''}">${value}</div>
+    ${sub ? `<div class="stat-sub">${sub}</div>` : ''}
   </div>`;
 }
 
-
-/* ----------------------------------------------------------------------------
- * Action ideas
- * --------------------------------------------------------------------------*/
-function renderActionIdeas() {
-  const container = document.getElementById('actionIdeas');
-  const order = ['add', 'hold', 'monitor', 'noadd', 'reduce', 'inactive'];
-
-  container.innerHTML = order
-    .map((key) => {
-      const cat = ACTION_CATEGORIES[key];
-      const members = STATE.positions
-        .filter((p) => p.action === key)
-        .sort((a, b) => b.scores.total - a.scores.total);
-      if (members.length === 0) return '';
-
-      const chips = members
-        .map(
-          (p) =>
-            `<span class="ai-chip"><strong>${escapeHtml(p.symbol)}</strong> <span class="ai-score">${p.scores.total}</span></span>`
-        )
-        .join('');
-
-      return `
-      <div class="action-col ${cat.cls}">
-        <div class="ai-head">
-          <span class="ai-title">${cat.label}</span>
-          <span class="ai-count">${members.length}</span>
-        </div>
-        <div class="ai-desc">${cat.desc}</div>
-        <div class="ai-chips">${chips}</div>
-      </div>`;
-    })
-    .join('');
+/**
+ * Bar list. items: { label (HTML), value, tone?, current?, segments? }.
+ * segments: [{ value, tone }] for a stacked bar (2 px surface gap between).
+ */
+function bars(items, { max, tone = 'blue', format = (v) => fmtPercent(v, 1), cls = '', empty = 'Keine Daten' } = {}) {
+  if (!items.length) return `<p class="empty-note">${empty}</p>`;
+  const top = max ?? Math.max(...items.map((i) => i.value), 1e-9);
+  const rows = items.map((i) => {
+    const width = Math.min(100, (i.value / top) * 100).toFixed(1);
+    const segs = (i.segments || [{ value: i.value, tone: i.tone || tone }]).filter((s) => s.value > 0);
+    const segSum = segs.reduce((s, x) => s + x.value, 0);
+    return `<div class="bar-row${i.current ? ' is-current' : ''}">
+      <span class="bar-label">${i.label}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${width}%">${segs
+        .map((s) => `<span class="bar-seg tone-${s.tone}" style="flex:${((s.value / segSum) * 100).toFixed(2)}"></span>`)
+        .join('')}</span></span>
+      <span class="bar-value">${format(i.value, i)}</span>
+    </div>`;
+  });
+  return `<div class="bars ${cls}">${rows.join('')}</div>`;
 }
 
-/* ----------------------------------------------------------------------------
- * Handlungsempfehlungen (individual, prioritised recommendations)
- * ----------------------------------------------------------------------------
- * Synthesises the whole analysis (scores, allocation, concentration, growth,
- * income, top-up quality) into concrete, individual recommendations for THIS
- * portfolio. Rule-based and non-advisory ("prüfen", "könnte sinnvoll sein").
- * Each rec: { sev:'high'|'mid'|'low', cat, title, text }.
- * --------------------------------------------------------------------------*/
-function buildRecommendations() {
-  const ctx = STATE.ctx;
-  const active = STATE.active;
-  const totalDiv = ctx.totalAnnualDividend;
-  const recs = [];
-
-  // --- Portfolio: country concentration ---
-  Object.entries(ctx.countryAllocation)
-    .filter(([k]) => !isGeneric(k))
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([k, v]) => {
-      if (v > 0.6)
-        recs.push({ sev: 'high', cat: 'Diversifizieren', title: `Länderklumpen ${fmtCountry(k)} (${fmtPercent(v, 1)})`, text: `Über die Hälfte des Depots entfällt auf ${fmtCountry(k)}. Eine breitere internationale Streuung (z. B. Europa, Emerging Markets) könnte das Klumpenrisiko senken; weitere ${fmtCountry(k)}-Käufe eher zurückstellen.` });
-      else if (v > 0.45)
-        recs.push({ sev: 'mid', cat: 'Diversifizieren', title: `Hohe ${fmtCountry(k)}-Gewichtung (${fmtPercent(v, 1)})`, text: `${fmtCountry(k)} ist überdurchschnittlich gewichtet. Bei Neukäufen stärker auf andere Regionen achten könnte sinnvoll sein.` });
-    });
-
-  // --- Portfolio: sector concentration ---
-  Object.entries(ctx.sectorAllocation)
-    .filter(([k]) => !isGeneric(k))
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([k, v]) => {
-      if (v > 0.25)
-        recs.push({ sev: 'high', cat: 'Diversifizieren', title: `Sektor ${k} stark gewichtet (${fmtPercent(v, 1)})`, text: `Der Sektor ${k} macht ${fmtPercent(v, 1)} des Depots aus. Weitere Käufe in diesem Sektor erhöhen das Konzentrationsrisiko; ergänzende Sektoren prüfen.` });
-      else if (v > 0.2)
-        recs.push({ sev: 'mid', cat: 'Diversifizieren', title: `Sektor ${k} beobachten (${fmtPercent(v, 1)})`, text: `${k} nähert sich einer hohen Gewichtung (${fmtPercent(v, 1)}). Weitere Aufstockungen hier eher zurückhaltend.` });
-    });
-
-  // --- Portfolio: income concentration ---
-  active
-    .map((p) => ({ p, s: totalDiv > 0 ? num0(p.totalDividendRate) / totalDiv : 0 }))
-    .filter((x) => x.s > 0.08)
-    .sort((a, b) => b.s - a.s)
-    .forEach(({ p, s }) => {
-      recs.push({ sev: s > 0.1 ? 'high' : 'mid', cat: 'Einkommen', title: `Einkommensklumpen: ${p.symbol} (${fmtPercent(s, 1)} der Dividenden)`, text: `${p.symbol} liefert ${fmtPercent(s, 1)} deiner gesamten Dividenden. Eine Kürzung träfe dein Einkommen spürbar – weitere Aufstockung erhöht die Abhängigkeit.` });
-    });
-
-  // --- Position-level ---
-  active.forEach((p) => {
-    const s = p.scores;
-    const alloc = p.allocation || 0;
-    const dy = p.dividendYield;
-    const cagr = p.dividendCagr;
-    const gainRel = p.gainRel;
-    // Dividendless assets (crypto, accumulating ETFs) are out of scope for the
-    // dividend-focused score -> handled as a separate info hint below, not as a
-    // "critical score" risk.
-    const nonDividend = num0(p.totalDividendRate) <= 0;
-
-    if (alloc > 0.08)
-      recs.push({ sev: 'high', cat: 'Reduzieren', title: `${p.symbol} übergewichtet (${fmtPercent(alloc, 1)})`, text: `${p.symbol} (${p.name}) liegt über 8 % Depotanteil. Eine Teilreduzierung – mindestens aber ein Aufstockungsstopp – könnte das Klumpenrisiko begrenzen.` });
-    else if (alloc > 0.05 && (s.total < 55 || (hasNum(cagr) && cagr < 0)))
-      recs.push({ sev: 'mid', cat: 'Reduzieren', title: `${p.symbol} groß bei schwachen Signalen (${fmtPercent(alloc, 1)})`, text: `${p.symbol} ist überdurchschnittlich groß und zeigt schwächere Kennzahlen (Score ${s.total}${hasNum(cagr) && cagr < 0 ? `, negativer Dividenden-CAGR ${fmtPercent(cagr, 1)}` : ''}). Reduzierung prüfen und nicht weiter aufstocken.` });
-
-    if (s.total < 40 && !nonDividend)
-      recs.push({ sev: 'high', cat: 'Risiko', title: `${p.symbol}: kritischer Score (${s.total})`, text: `${p.symbol} erreicht nur einen Score von ${s.total}. Position kritisch prüfen – nicht aufstocken; ggf. Trennung erwägen.` });
-
-    if (hasNum(dy) && dy > 0.08) {
-      if (hasNum(cagr) && cagr < 0)
-        recs.push({ sev: 'high', cat: 'Risiko', title: `${p.symbol}: mögliche Renditefalle (${fmtPercent(dy)})`, text: `Sehr hohe Rendite (${fmtPercent(dy)}) bei negativem Dividendenwachstum (${fmtPercent(cagr, 1)}). Dividendensicherheit kritisch prüfen, bevor aufgestockt wird.` });
-      else
-        recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: hohe Rendite prüfen (${fmtPercent(dy)})`, text: `Auffällig hohe Rendite (${fmtPercent(dy)}). Nachhaltigkeit der Dividende beobachten; nur mit Bedacht aufstocken.` });
-    } else if (hasNum(cagr) && cagr < 0 && alloc <= 0.05) {
-      recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: rückläufige Dividende`, text: `Negativer Dividenden-CAGR (${fmtPercent(cagr, 1)}). Investmentthese und Dividendensicherheit prüfen.` });
-    }
-
-    if (hasNum(gainRel) && gainRel <= -0.15 && num0(p.totalDividendRate) > 0)
-      recs.push({ sev: 'mid', cat: 'Beobachten', title: `${p.symbol}: deutlicher Buchverlust (${fmtSignedPercent(gainRel)})`, text: `Trotz laufender Dividende ein klarer Kursverlust. Prüfen, ob die ursprüngliche Investmentthese noch trägt.` });
+/** Progress meter; segments [{ value, tone }] stack against max (capped at 100 %). */
+function meter(segments, max, label) {
+  let left = 100;
+  const spans = segments.map((s) => {
+    const w = Math.min(left, max > 0 ? (s.value / max) * 100 : 0);
+    left -= w;
+    return w > 0 ? `<span class="tone-${s.tone}" style="width:${w.toFixed(1)}%"></span>` : '';
   });
-
-  // --- Opportunities: strong, underweight add candidates (from top-up model) ---
-  const addCands = [];
-  active.forEach((p) => {
-    const m = topUpMetrics(p, ctx);
-    if (!topUpEligible(p, ctx, m)) return;
-    const q = topUpQuality(p, m);
-    const softCap = topUpSoftCap(q);
-    if ((p.allocation || 0) < softCap * 0.6) addCands.push({ p, q, m });
-  });
-  addCands
-    .sort((a, b) => b.q - a.q)
-    .slice(0, 4)
-    .forEach(({ p, m }) => {
-      const sectorHint = !m.genericSector && m.sectorShare < 0.1 ? `, untergewichteter Sektor ${p.sector}` : '';
-      recs.push({ sev: 'low', cat: 'Aufstocken', title: `${p.symbol}: Aufstockung könnte sinnvoll sein`, text: `Starker, noch untergewichteter Wert (Score ${p.scores.total}, Anteil ${fmtPercent(p.allocation, 1)}${sectorHint}). Ein schrittweiser Ausbau könnte das Profil verbessern – Details im Aufstock-Plan.` });
-    });
-
-  // Dividendless assets (crypto, accumulating ETFs): one informational hint
-  // instead of flagging each as a "critical score".
-  const nonDivSyms = active.filter((p) => num0(p.totalDividendRate) <= 0).map((p) => p.symbol);
-  if (nonDivSyms.length)
-    recs.push({ sev: 'info', cat: 'Hinweis', title: `Werte ohne Dividende (${nonDivSyms.length})`, text: `${nonDivSyms.join(', ')} schütten keine Dividende aus (z. B. Krypto oder thesaurierende ETFs). Der dividendenbasierte Score ist für diese Werte nur eingeschränkt aussagekräftig – sie nach eigener Strategie (z. B. Wachstum oder Beimischung) bewerten.` });
-
-  // Dedupe by title, then sort by severity (high -> mid -> low -> info).
-  const seen = new Set();
-  const order = { high: 0, mid: 1, low: 2, info: 3 };
-  return recs
-    .filter((r) => (seen.has(r.title) ? false : (seen.add(r.title), true)))
-    .sort((a, b) => order[a.sev] - order[b.sev]);
+  return `<div class="meter" role="img" aria-label="${escapeHtml(label)}">${spans.join('')}</div>`;
 }
 
-function renderRecommendations() {
-  if (!STATE.active.length) return;
-  const recs = buildRecommendations();
-  const sumEl = document.getElementById('recSummary');
-  const listEl = document.getElementById('recList');
-
-  if (!recs.length) {
-    sumEl.innerHTML = '';
-    listEl.innerHTML = '<div class="risk-ok">Aktuell keine dringenden Handlungsempfehlungen aus den CSV-Kennzahlen erkennbar.</div>';
-    return;
-  }
-
-  const count = (sev) => recs.filter((r) => r.sev === sev).length;
-  const parts = [
-    ['high', 'hoch'], ['mid', 'mittel'], ['low', 'Chancen'], ['info', 'Hinweise'],
-  ]
-    .filter(([sev]) => count(sev) > 0)
-    .map(([sev, label]) => `<span>${count(sev)} ${label}</span>`)
-    .join('');
-  sumEl.innerHTML = `<span><strong>${recs.length}</strong> Empfehlungen</span>${parts}`;
-
-  const sevLabel = { high: 'Hoch', mid: 'Mittel', low: 'Chance', info: 'Hinweis' };
-  listEl.innerHTML = recs
-    .map(
-      (r) => `
-      <div class="rec-card rec-${r.sev}">
-        <div class="rec-head">
-          <span class="risk-badge rec-badge-${r.sev}">${sevLabel[r.sev]}</span>
-          <span class="rec-cat">${r.cat}</span>
-          <span class="rec-title">${escapeHtml(r.title)}</span>
-        </div>
-        <div class="rec-text">${escapeHtml(r.text)}</div>
-      </div>`
-    )
-    .join('');
-}
-
-/* ----------------------------------------------------------------------------
- * Risk & concentration
- * ----------------------------------------------------------------------------
- * Transparent concentration analytics derived from the CSV: HHI / effective
- * number of holdings, top-N share, single-position / sector / country / income
- * concentration, yield-trap flags and an overall diversification score.
- * "mixed" / "Unbekannt" buckets are broad ETFs/funds and are treated as
- * diversified (not flagged as a single-name risk).
- * --------------------------------------------------------------------------*/
-const GENERIC_BUCKETS = ['mixed', 'Unbekannt', ''];
-
-function isGeneric(key) {
-  return GENERIC_BUCKETS.includes(key);
-}
-
-/** Herfindahl-Hirschman Index (sum of squared shares) for a list of fractions. */
-function hhi(shares) {
-  return shares.reduce((s, w) => s + w * w, 0);
-}
-
-/** Effective number of items = 1 / HHI (1 = fully concentrated). */
-function effectiveCount(shares) {
-  const h = hhi(shares);
-  return h > 0 ? 1 / h : 0;
-}
-
-function computeRisk() {
-  const active = STATE.active;
-  const ctx = STATE.ctx;
-  const totalValue = ctx.totalValue;
-  const totalDiv = ctx.totalAnnualDividend;
-
-  // Position weights (desc).
-  const positions = active
-    .map((p) => ({ p, w: totalValue > 0 ? num0(p.value) / totalValue : 0 }))
-    .sort((a, b) => b.w - a.w);
-  const posShares = positions.map((x) => x.w);
-  const effN = effectiveCount(posShares);
-  const top5 = posShares.slice(0, 5).reduce((s, w) => s + w, 0);
-  const top10 = posShares.slice(0, 10).reduce((s, w) => s + w, 0);
-  const largest = positions[0] || null;
-
-  // Sector / country shares (entries desc).
-  const sectorEntries = Object.entries(ctx.sectorAllocation).sort((a, b) => b[1] - a[1]);
-  const countryEntries = Object.entries(ctx.countryAllocation).sort((a, b) => b[1] - a[1]);
-  const namedSector = sectorEntries.filter(([k]) => !isGeneric(k));
-  const namedCountry = countryEntries.filter(([k]) => !isGeneric(k));
-  const largestSector = namedSector[0] || null;
-  const largestCountry = namedCountry[0] || null;
-
-  // Income concentration (dividend payers).
-  const payers = active
-    .map((p) => ({ p, s: totalDiv > 0 ? num0(p.totalDividendRate) / totalDiv : 0 }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s);
-  const incomeShares = payers.map((x) => x.s);
-  const effNIncome = effectiveCount(incomeShares);
-  const topPayer = payers[0] || null;
-
-  // --- Diversification score (0..100, transparent) ---
-  const posDiv = clamp100((effN / 30) * 100); // 30+ effective holdings -> 100
-  const sectorDiv = clamp100(100 - (Math.max(0, (largestSector ? largestSector[1] : 0) - 0.1) / 0.25) * 100); // 10%->100, 35%->0
-  const countryDiv = clamp100(100 - (Math.max(0, (largestCountry ? largestCountry[1] : 0) - 0.3) / 0.4) * 100); // 30%->100, 70%->0
-  const incomeDiv = clamp100((effNIncome / 25) * 100);
-  const diversification = Math.round(0.35 * posDiv + 0.25 * sectorDiv + 0.2 * countryDiv + 0.2 * incomeDiv);
-
-  // --- Warnings ---
-  const flags = [];
-  positions.forEach(({ p, w }) => {
-    if (w > 0.08) flags.push({ sev: 'high', text: `Klumpenrisiko: ${p.symbol} macht ${fmtPercent(w, 1)} des Depots aus (> 8 %).` });
-    else if (w > 0.05) flags.push({ sev: 'mid', text: `${p.symbol} ist mit ${fmtPercent(w, 1)} überdurchschnittlich groß (> 5 %).` });
-  });
-  namedSector.forEach(([k, v]) => {
-    if (v > 0.3) flags.push({ sev: 'high', text: `Sektor ${k} ist mit ${fmtPercent(v, 1)} sehr hoch gewichtet (> 30 %).` });
-    else if (v > 0.2) flags.push({ sev: 'mid', text: `Sektor ${k} ist mit ${fmtPercent(v, 1)} hoch gewichtet (> 20 %).` });
-  });
-  namedCountry.forEach(([k, v]) => {
-    if (v > 0.6) flags.push({ sev: 'high', text: `Land ${fmtCountry(k)} ist mit ${fmtPercent(v, 1)} sehr hoch gewichtet (> 60 %).` });
-    else if (v > 0.45) flags.push({ sev: 'mid', text: `Land ${fmtCountry(k)} ist mit ${fmtPercent(v, 1)} hoch gewichtet (> 45 %).` });
-  });
-  payers.forEach(({ p, s }) => {
-    if (s > 0.1) flags.push({ sev: 'high', text: `${p.symbol} liefert ${fmtPercent(s, 1)} der gesamten Dividenden – hohe Einkommenskonzentration.` });
-    else if (s > 0.06) flags.push({ sev: 'mid', text: `${p.symbol} liefert ${fmtPercent(s, 1)} der gesamten Dividenden.` });
-  });
-  active.forEach((p) => {
-    const dy = p.dividendYield;
-    const cagr = p.dividendCagr;
-    if (hasNum(dy) && dy > 0.08) {
-      if (hasNum(cagr) && cagr < 0)
-        flags.push({ sev: 'high', text: `${p.symbol}: sehr hohe Rendite (${fmtPercent(dy)}) bei negativem Dividendenwachstum – mögliche Renditefalle.` });
-      else if (!hasNum(cagr) || cagr < 0.05)
-        flags.push({ sev: 'mid', text: `${p.symbol}: sehr hohe Rendite (${fmtPercent(dy)}) bei schwachem Wachstum – kritisch beobachten.` });
-    }
-  });
-  if (effN < 12)
-    flags.push({ sev: 'mid', text: `Geringe effektive Streuung: nur ${fmtNumber(effN, 1)} effektive Positionen trotz ${active.length} Werten.` });
-
-  // High severity first.
-  flags.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === 'high' ? -1 : 1));
-
-  return {
-    positions, effN, top5, top10, largest,
-    sectorEntries, countryEntries, largestSector, largestCountry,
-    payers, effNIncome, topPayer,
-    diversification, flags,
-  };
-}
-
-/** Render a list of concentration bars. items: [{label, value, sev, sub}]. */
-function concBars(items) {
-  if (!items.length) return '<div class="conc-empty">Keine Daten</div>';
-  const max = Math.max(...items.map((i) => i.value), 0.0001);
+/** Chip buttons; items: { value, label, count?, tone? }. */
+function chips(items, active) {
   return items
     .map(
-      (i) => `
-      <div class="conc-row">
-        <span class="conc-label" title="${escapeHtml(i.label)}">${escapeHtml(i.label)}</span>
-        <span class="conc-track"><span class="conc-fill ${i.sev ? 'conc-' + i.sev : ''}" style="width:${((i.value / max) * 100).toFixed(1)}%"></span></span>
-        <span class="conc-val">${fmtPercent(i.value, 1)}</span>
-      </div>`
+      (i) => `<button type="button" class="chip" data-value="${i.value}" aria-pressed="${i.value === active}">${
+        i.tone ? `<span class="dot tone-${i.tone}"></span>` : ''
+      }${i.label}${i.count !== undefined ? ` <span class="chip-count">${i.count}</span>` : ''}</button>`
     )
     .join('');
 }
 
-function renderRisk() {
-  if (!STATE.active.length) return;
-  const r = computeRisk();
-
-  // KPI cards.
-  const dColor = scoreColor(r.diversification);
-  const cards = [
-    { label: 'Diversifikations-Score', value: `<span style="color:${dColor}">${r.diversification}</span>`, sub: '0–100 · höher = breiter gestreut' },
-    { label: 'Effektive Positionen', value: fmtNumber(r.effN, 1), sub: `von ${r.positions.length} aktiven` },
-    { label: 'Größte Position', value: r.largest ? r.largest.p.symbol : 'n/a', sub: r.largest ? fmtPercent(r.largest.w, 1) : '' },
-    { label: 'Top-10-Anteil', value: fmtPercent(r.top10, 1), sub: `Top 5: ${fmtPercent(r.top5, 1)}` },
-    { label: 'Größter Sektor', value: r.largestSector ? r.largestSector[0] : 'n/a', sub: r.largestSector ? fmtPercent(r.largestSector[1], 1) : '' },
-    { label: 'Größtes Land', value: r.largestCountry ? fmtCountry(r.largestCountry[0]) : 'n/a', sub: r.largestCountry ? fmtPercent(r.largestCountry[1], 1) : '' },
-    { label: 'Größter Dividendenzahler', value: r.topPayer ? r.topPayer.p.symbol : 'n/a', sub: r.topPayer ? `${fmtPercent(r.topPayer.s, 1)} des Einkommens` : '' },
-    { label: 'Risiko-Hinweise', value: fmtNumber(r.flags.length, 0), sub: `${r.flags.filter((f) => f.sev === 'high').length} hoch` },
-  ];
-  document.getElementById('riskKpis').innerHTML = cards
-    .map(
-      (c) => `
-      <div class="kpi-card">
-        <div class="kpi-label">${c.label}</div>
-        <div class="kpi-value">${c.value}</div>
-        ${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}
-      </div>`
-    )
-    .join('');
-
-  // Flags.
-  const flagsEl = document.getElementById('riskFlags');
-  if (!r.flags.length) {
-    flagsEl.innerHTML = '<div class="risk-ok">Keine kritischen Klumpenrisiken in den CSV-Kennzahlen erkennbar.</div>';
-  } else {
-    flagsEl.innerHTML = r.flags
-      .map(
-        (f) => `<div class="risk-flag risk-${f.sev}"><span class="risk-badge">${f.sev === 'high' ? 'Hoch' : 'Mittel'}</span><span>${escapeHtml(f.text)}</span></div>`
-      )
-      .join('');
-  }
-
-  // Detail bars.
-  document.getElementById('riskTopPositions').innerHTML = concBars(
-    r.positions.slice(0, 10).map(({ p, w }) => ({
-      label: `${p.symbol} · ${p.name}`,
-      value: w,
-      sev: w > 0.08 ? 'high' : w > 0.05 ? 'mid' : null,
-    }))
-  );
-  document.getElementById('riskIncome').innerHTML = concBars(
-    r.payers.slice(0, 10).map(({ p, s }) => ({
-      label: `${p.symbol} · ${p.name}`,
-      value: s,
-      sev: s > 0.1 ? 'high' : s > 0.06 ? 'mid' : null,
-    }))
-  );
-  document.getElementById('riskSectors').innerHTML = concBars(
-    r.sectorEntries.map(([k, v]) => ({
-      label: isGeneric(k) ? `${k === 'mixed' ? 'Gemischt (ETFs)' : 'Unbekannt'}` : k,
-      value: v,
-      sev: isGeneric(k) ? null : v > 0.3 ? 'high' : v > 0.2 ? 'mid' : null,
-    }))
-  );
-  document.getElementById('riskCountries').innerHTML = concBars(
-    r.countryEntries.map(([k, v]) => ({
-      label: isGeneric(k) ? (k === 'mixed' ? 'Gemischt (ETFs)' : 'Unbekannt') : fmtCountry(k),
-      value: v,
-      sev: isGeneric(k) ? null : v > 0.6 ? 'high' : v > 0.45 ? 'mid' : null,
-    }))
-  );
+/** Legend; items: [label, tone]. */
+function legend(items) {
+  return `<span class="legend">${items.map(([label, t]) => `<span class="key tone-${t}">${label}</span>`).join('')}</span>`;
 }
 
-/* ----------------------------------------------------------------------------
- * Dividend calendar & income projection — shared helpers
- * ----------------------------------------------------------------------------
- * Only the next payDate per position is in the CSV, so the remaining payments
- * are spread over the year from the payDate's month according to the frequency.
- * Everything is derived from the CSV (totalDividendRate, frequency, payDate,
- * taxRate, dividendCagr).
- * --------------------------------------------------------------------------*/
-const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-
-/** Number of payouts per year for a frequency (0 = none). */
-function paymentsPerYear(freq) {
-  switch ((freq || '').toLowerCase()) {
-    case 'monthly': return 12;
-    case 'quarterly': return 4;
-    case 'biannually': return 2;
-    case 'annually': return 1;
-    default: return 0;
-  }
+/** Legend for the orange / red warning limits of a {mid, high} threshold. */
+function limitLegend(limit) {
+  return legend([
+    [`> ${fmtPercent(limit.mid, 0)}`, 'orange'],
+    [`> ${fmtPercent(limit.high, 0)}`, 'red'],
+  ]);
 }
 
-/** Calendar months (0=Jan) a position pays in, anchored on its payDate month. */
-function payMonths(freq, anchorMonth) {
-  const ppy = paymentsPerYear(freq);
-  if (ppy === 0) return [];
-  if (ppy === 12) return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  const step = 12 / ppy;
-  const anchor = anchorMonth >= 0 ? anchorMonth : 0;
-  const out = [];
-  for (let k = 0; k < ppy; k++) out.push((anchor + k * step) % 12);
+const sevTone = (sev) => (sev ? SEVERITY[sev].tone : 'blue');
+
+function scoreRing(score) {
+  const l = scoreLevel(score);
+  const c = 2 * Math.PI * 52;
+  return `<div class="ring tone-${l.tone}" role="img" aria-label="Score ${score} von 100, ${l.label}">
+    <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52" stroke-dasharray="${((score / 100) * c).toFixed(1)} ${c.toFixed(1)}"/></svg>
+    <div class="ring-text"><span class="ring-num">${score}</span><span class="ring-lbl">${l.label}</span></div>
+  </div>`;
+}
+
+function countBy(list, key) {
+  const out = {};
+  for (const x of list) out[x[key]] = (out[x[key]] || 0) + 1;
   return out;
 }
 
-/** Month index (0..11) from an ISO date, or -1. */
-function monthIndexOf(dateStr) {
-  const m = String(dateStr || '').match(/^\d{4}-(\d{2})-\d{2}$/);
-  return m ? parseInt(m[1], 10) - 1 : -1;
-}
-
-/** Parse an ISO date (YYYY-MM-DD) into a Date at local midnight, or null. */
-function parseISODate(s) {
-  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
-}
-
-/** Per-month gross & net dividend distribution across the calendar year. */
-function computeIncomeDistribution() {
-  const gross = new Array(12).fill(0);
-  const net = new Array(12).fill(0);
-  STATE.active.forEach((p) => {
-    const total = num0(p.totalDividendRate);
-    const ppy = paymentsPerYear(p.dividendFrequency);
-    if (total <= 0 || ppy === 0) return;
-    const months = payMonths(p.dividendFrequency, monthIndexOf(p.payDate));
-    if (!months.length) return;
-    const per = total / ppy;
-    const taxRate = hasNum(p.taxRate) ? p.taxRate : 0;
-    months.forEach((mi) => {
-      gross[mi] += per;
-      net[mi] += per * (1 - taxRate);
-    });
-  });
-  const grossAnnual = gross.reduce((s, v) => s + v, 0);
-  const netAnnual = net.reduce((s, v) => s + v, 0);
-  return { gross, net, grossAnnual, netAnnual, taxAnnual: grossAnnual - netAnnual };
-}
-
-/** Upcoming dividend payments (next payDate per position), future first. */
-function upcomingPayments() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const list = [];
-  STATE.active.forEach((p) => {
-    const total = num0(p.totalDividendRate);
-    const ppy = paymentsPerYear(p.dividendFrequency);
-    if (total <= 0 || ppy === 0) return;
-    const d = parseISODate(p.payDate);
-    if (!d || d < today) return;
-    list.push({
-      date: d,
-      payDate: p.payDate,
-      exDate: p.exDate,
-      symbol: p.symbol,
-      name: p.name,
-      freq: p.dividendFrequency,
-      per: total / ppy,
-    });
-  });
-  return list.sort((a, b) => a.date - b.date);
-}
-
 /* ----------------------------------------------------------------------------
- * Dividend calendar rendering
+ * Übersicht
  * --------------------------------------------------------------------------*/
-function renderCalendar() {
-  if (!STATE.active.length) return;
-  const dist = computeIncomeDistribution();
-  const maxMonth = Math.max(...dist.gross, 0.0001);
-  const currentMonth = new Date().getMonth();
+function renderOverview() {
+  const d = STATE.data;
+  const k = d.kpis;
+  const inc = d.income;
+  const r = d.risk;
+  const gainTone = k.gain >= 0 ? 'green' : 'red';
+  const div = scoreLevel(r.diversification);
 
-  // Strongest month + averages.
-  let maxIdx = 0;
-  dist.gross.forEach((v, i) => {
-    if (v > dist.gross[maxIdx]) maxIdx = i;
-  });
-  const upcoming = upcomingPayments();
-  const today = new Date();
-  const in30 = new Date();
-  in30.setDate(in30.getDate() + 30);
-  const next30 = upcoming.filter((u) => u.date <= in30);
-  const next30Sum = next30.reduce((s, u) => s + u.per, 0);
-  const monthlyPayers = STATE.active.filter((p) => paymentsPerYear(p.dividendFrequency) === 12 && num0(p.totalDividendRate) > 0).length;
+  $('ovHero').innerHTML = [
+    stat({
+      hero: true,
+      label: 'Depotwert',
+      value: fmtCurrency(k.totalValue, 0),
+      sub: `<span class="tone-text tone-${gainTone}">${fmtSignedCurrency(k.gain, 0)} (${fmtSignedPercent(k.gainRel, 1)})</span> · investiert ${fmtCurrency(k.invested, 0)}`,
+    }),
+    stat({
+      hero: true,
+      label: 'Dividenden p.a. brutto',
+      value: fmtCurrency(inc.grossAnnual, 0),
+      sub: `${fmtCurrency(inc.grossAnnual / 12, 0)} pro Monat · netto ${fmtCurrency(inc.netAnnual / 12, 0)}`,
+    }),
+  ].join('');
 
-  const cards = [
-    { label: 'Jährliche Bruttodividende', value: fmtCurrency(dist.grossAnnual) },
-    { label: 'Ø Ausschüttung / Monat', value: fmtCurrency(dist.grossAnnual / 12) },
-    { label: 'Stärkster Monat', value: MONTHS_DE[maxIdx], sub: fmtCurrency(dist.gross[maxIdx]) },
-    {
-      label: 'Nächster Zahltag',
-      value: upcoming.length ? fmtDate(upcoming[0].payDate) : 'n/a',
-      sub: upcoming.length ? upcoming[0].symbol : '',
-    },
-    { label: 'Nächste 30 Tage', value: fmtCurrency(next30Sum), sub: `${next30.length} Zahlungen` },
-    { label: 'Monatliche Zahler', value: fmtNumber(monthlyPayers, 0), sub: 'Positionen' },
-  ];
-  document.getElementById('calendarKpis').innerHTML = cards
-    .map(
-      (c) => `<div class="kpi-card kpi-income"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
-    )
-    .join('');
+  $('ovStats').innerHTML = [
+    stat({ label: 'Dividendenrendite', value: fmtPercent(k.weightedYield), sub: 'gewichtet' }),
+    stat({ label: 'Yield on Cost', value: fmtPercent(k.weightedYoc), sub: 'auf den Einstand' }),
+    stat({ label: 'Positionen', value: k.activeCount, sub: `${k.payerCount} Dividendenzahler` }),
+    stat({ label: 'Diversifikation', value: `${r.diversification}<small> / 100</small>`, sub: tag(div.label, div.tone) }),
+    stat({
+      label: 'Größter Einzelwert',
+      value: r.largestSingle ? symLink(r.largestSingle) : NA,
+      sub: r.largestSingle ? `${fmtPercent(r.largestSingle.allocation, 1)} des Depots` : '',
+    }),
+    stat({
+      label: 'Größter Zahler',
+      value: k.largestPayer ? symLink(k.largestPayer) : NA,
+      sub: k.largestPayer ? `${fmtCurrency(k.largestPayer.totalDividendRate, 0)} pro Jahr` : '',
+    }),
+  ].join('');
 
-  // Monthly bars.
-  document.getElementById('calMonths').innerHTML = dist.gross
-    .map(
-      (v, i) => `
-      <div class="cal-row ${i === currentMonth ? 'cal-current' : ''}">
-        <span class="cal-mlabel">${MONTHS_DE[i]}</span>
-        <span class="cal-barwrap"><span class="cal-fill" style="width:${((v / maxMonth) * 100).toFixed(1)}%"></span></span>
-        <span class="cal-val">${fmtCurrency(v)}</span>
-      </div>`
-    )
-    .join('');
+  // Quick look: urgent findings, next payments, target progress.
+  const counts = countBy(d.recs, 'sev');
+  const urgent = d.recs.filter((x) => x.sev === 'high' || x.sev === 'mid').slice(0, 4);
+  const until = Date.now() + 30 * DAY_MS;
+  const next30 = d.upcoming.filter((u) => u.date <= until);
+  const t = computeTarget(d, STATE.settings);
+  const goal = STATE.settings.target;
+  const projM = t.projectedNet / 12;
 
-  // Upcoming table.
-  const tbody = document.getElementById('calUpcoming');
-  if (!upcoming.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="conc-empty">Keine zukünftigen Zahltermine in der CSV.</td></tr>';
-  } else {
-    tbody.innerHTML = upcoming
-      .slice(0, 24)
-      .map(
-        (u) => `
-        <tr>
-          <td>${fmtDate(u.exDate)}</td>
-          <td>${fmtDate(u.payDate)}</td>
-          <td class="t-sym">${escapeHtml(u.symbol)}</td>
-          <td class="t-name" title="${escapeHtml(u.name)}">${escapeHtml(u.name)}</td>
-          <td>${fmtFrequency(u.freq)}</td>
-          <td class="t-num">${fmtCurrency(u.per)}</td>
-        </tr>`
-      )
-      .join('');
-  }
+  $('ovCards').innerHTML = `
+    <article class="card">
+      <div class="card-head">
+        <h2 class="card-title">Handlungsbedarf</h2>
+        <span class="legend">${['high', 'mid', 'low'].filter((s) => counts[s]).map((s) => tag(`${counts[s]} ${SEVERITY[s].plural}`, SEVERITY[s].tone)).join(' ')}</span>
+      </div>
+      <ul class="ov-list">${
+        urgent.map((x) => `<li>${tag(SEVERITY[x.sev].label, SEVERITY[x.sev].tone)}<span class="ov-text">${escapeHtml(x.title)}</span></li>`).join('') ||
+        '<li class="muted">Keine dringenden Punkte.</li>'
+      }</ul>
+      <a class="link card-foot" href="#empfehlungen">Alle ${d.recs.length} Empfehlungen →</a>
+    </article>
+    <article class="card">
+      <div class="card-head">
+        <h2 class="card-title">Nächste Zahlungen</h2>
+        <span class="card-note">${fmtCurrency(next30.reduce((s, u) => s + u.amount, 0), 0)} in 30 Tagen</span>
+      </div>
+      <ul class="ov-list">${
+        d.upcoming
+          .slice(0, 4)
+          .map((u) => `<li><span class="ov-date">${fmtDate(u.p.payDate, true)}</span><span class="ov-text">${posLabel(u.p)}</span><span class="ov-amount">${fmtCurrency(u.amount)}</span></li>`)
+          .join('') || '<li class="muted">Keine Termine in der CSV.</li>'
+      }</ul>
+      <a class="link card-foot" href="#einkommen">Kalender &amp; Prognose →</a>
+    </article>
+    <article class="card">
+      <div class="card-head">
+        <h2 class="card-title">Ziel ${TARGET_YEAR}</h2>
+        <span class="card-note">${fmtPercent(goal > 0 ? projM / goal : 0, 0)} erreicht</span>
+      </div>
+      ${meter([{ value: t.projectedNet, tone: 'green' }], t.targetAnnual, 'Fortschritt zum Monatsziel')}
+      <p><strong>${fmtCurrency(projM, 0)}</strong> <span class="muted">von ${fmtCurrency(goal, 0)} netto pro Monat (organisch)</span></p>
+      <p class="muted">${t.reached ? 'Ziel organisch erreicht.' : `Lücke: ${fmtCurrency(t.gap / 12, 0)} pro Monat`}</p>
+      <a class="link card-foot" href="#ziel">Ziel ${TARGET_YEAR} →</a>
+    </article>`;
 }
 
 /* ----------------------------------------------------------------------------
- * Income projection rendering
+ * Empfehlungen
+ * --------------------------------------------------------------------------*/
+function renderRecs() {
+  const recs = STATE.data.recs;
+  const counts = countBy(recs, 'sev');
+  const items = [{ value: 'all', label: 'Alle', count: recs.length }];
+  for (const [sev, s] of Object.entries(SEVERITY)) {
+    if (counts[sev]) items.push({ value: sev, label: s.plural, tone: s.tone, count: counts[sev] });
+  }
+  if (!items.some((i) => i.value === STATE.ui.rec)) STATE.ui.rec = 'all';
+  $('recFilter').innerHTML = chips(items, STATE.ui.rec);
+
+  const L = LIMITS;
+  const range = (l) => `> ${fmtPercent(l.mid, 0)} / > ${fmtPercent(l.high, 0)}`;
+  $('recMethod').innerHTML = `
+    <p>Eine Liste für alle Hinweise: Konzentration, Risiko, Wachstum, Einkommen und Chancen aus dem Aufstockplan.</p>
+    <p><strong>Schwellen (mittel / hoch)</strong>: Einzelwert ${range(L.position)}, Sektor ${range(L.sector)}, Land ${range(L.country)}, Anteil an den Dividenden ${range(L.income)}. Rendite über ${fmtPercent(L.highYield, 0)} ohne Dividendenwachstum ≥ ${fmtPercent(L.solidGrowth, 0)}; Buchverlust ab ${fmtPercent(L.drawdown, 0)}; weniger als ${L.minEffective} effektive Positionen.</p>
+    <p>Breit streuende ETFs/Fonds verteilen ihr Gewicht auf viele Unternehmen und zählen nicht als Einzelwert- oder Einkommensklumpen.</p>`;
+  renderRecList();
+}
+
+function renderRecList() {
+  const f = STATE.ui.rec;
+  const list = STATE.data.recs.filter((r) => f === 'all' || r.sev === f);
+  $('recList').innerHTML = list.length
+    ? list.map(recHtml).join('')
+    : '<p class="notice tone-green">Aktuell keine Handlungsempfehlungen aus den CSV-Kennzahlen erkennbar.</p>';
+}
+
+function recHtml(r) {
+  const s = SEVERITY[r.sev];
+  return `<article class="rec tone-${s.tone}">
+    <div class="rec-head">${tag(s.label, s.tone)}<span class="rec-cat">${r.cat}</span>${
+      r.symbol ? `<a class="link" href="${detailHref(r.symbol)}">Details</a>` : ''
+    }</div>
+    <h2 class="rec-title">${escapeHtml(r.title)}</h2>
+    <p class="rec-text">${escapeHtml(r.text)}</p>
+  </article>`;
+}
+
+/* ----------------------------------------------------------------------------
+ * Risiko
+ * --------------------------------------------------------------------------*/
+function renderRisk() {
+  const d = STATE.data;
+  const r = d.risk;
+  const counts = countBy(d.recs, 'sev');
+  const div = scoreLevel(r.diversification);
+  const top = r.payers[0];
+
+  $('riskStats').innerHTML = [
+    stat({ label: 'Diversifikation', value: `${r.diversification}<small> / 100</small>`, sub: tag(div.label, div.tone) }),
+    stat({ label: 'Effektive Positionen', value: fmtNumber(r.effN, 1), sub: `von ${d.active.length} Werten` }),
+    stat({
+      label: 'Größter Einzelwert',
+      value: r.largestSingle ? symLink(r.largestSingle) : NA,
+      sub: r.largestSingle ? fmtPercent(r.largestSingle.allocation, 1) : '',
+    }),
+    stat({ label: 'Top-10-Anteil', value: fmtPercent(r.top10, 1), sub: `Top 5: ${fmtPercent(r.top5, 1)}` }),
+    stat({
+      label: 'Größter Sektor',
+      value: r.largestSector ? escapeHtml(r.largestSector[0]) : NA,
+      sub: r.largestSector ? fmtPercent(r.largestSector[1], 1) : '',
+    }),
+    stat({
+      label: 'Größtes Land',
+      value: r.largestCountry ? escapeHtml(fmtCountry(r.largestCountry[0])) : NA,
+      sub: r.largestCountry ? fmtPercent(r.largestCountry[1], 1) : '',
+    }),
+    stat({ label: 'Größter Zahler', value: top ? symLink(top.p) : NA, sub: top ? `${fmtPercent(top.s, 1)} der Dividenden` : '' }),
+    stat({
+      label: 'Handlungsbedarf',
+      value: (counts.high || 0) + (counts.mid || 0),
+      sub: `<a class="link" href="#empfehlungen">${counts.high || 0} hoch · ${counts.mid || 0} mittel →</a>`,
+    }),
+  ].join('');
+
+  $('legendPosition').innerHTML = limitLegend(LIMITS.position);
+  $('legendIncome').innerHTML = limitLegend(LIMITS.income);
+  $('legendCountry').innerHTML = limitLegend(LIMITS.country);
+
+  $('riskPositions').innerHTML = bars(
+    r.byWeight.slice(0, 10).map((p) => ({
+      label: posLabel(p),
+      value: p.allocation,
+      tone: isDiversified(p) ? 'blue' : sevTone(sevOf(p.allocation, LIMITS.position)),
+    }))
+  );
+  $('riskPayers').innerHTML = bars(
+    r.payers.slice(0, 10).map(({ p, s }) => ({
+      label: posLabel(p),
+      value: s,
+      tone: isDiversified(p) ? 'blue' : sevTone(sevOf(s, LIMITS.income)),
+    }))
+  );
+  $('riskCountries').innerHTML = bars(
+    r.countryEntries.map(([k, v]) => ({
+      label: escapeHtml(fmtCountry(k)),
+      value: v,
+      tone: isGenericBucket(k) ? 'blue' : sevTone(sevOf(v, LIMITS.country)),
+    }))
+  );
+  $('riskTypes').innerHTML = bars(r.typeEntries.map(([k, v]) => ({ label: escapeHtml(fmtSecurityType(k)), value: v })));
+  $('riskCurrencies').innerHTML = bars(r.currencyEntries.map(([k, v]) => ({ label: escapeHtml(k), value: v })));
+  renderSectorBars();
+}
+
+/** Sectors by portfolio value (with limits) or by dividend contribution. */
+function renderSectorBars() {
+  const r = STATE.data.risk;
+  const byValue = STATE.ui.sectorMetric === 'value';
+  const entries = byValue ? r.sectorEntries : r.sectorIncomeEntries;
+  $('riskSectors').innerHTML =
+    (byValue ? limitLegend(LIMITS.sector) : '<span class="card-note">Anteil an den Dividenden</span>') +
+    bars(
+      entries.map(([k, v]) => ({
+        label: escapeHtml(fmtSector(k)),
+        value: v,
+        tone: byValue && !isGenericBucket(k) ? sevTone(sevOf(v, LIMITS.sector)) : 'blue',
+      })),
+      { cls: 'section' }
+    );
+}
+
+/* ----------------------------------------------------------------------------
+ * Einkommen
  * --------------------------------------------------------------------------*/
 function renderIncome() {
-  if (!STATE.active.length) return;
-  const dist = computeIncomeDistribution();
-  const k = STATE.kpis;
+  const d = STATE.data;
+  const inc = d.income;
+  const k = d.kpis;
+  const until = Date.now() + 30 * DAY_MS;
+  const next30 = d.upcoming.filter((u) => u.date <= until);
 
-  // Income-weighted dividend CAGR.
-  let wSum = 0;
-  let wWeight = 0;
-  STATE.active.forEach((p) => {
-    const t = num0(p.totalDividendRate);
-    if (t > 0 && hasNum(p.dividendCagr)) {
-      wSum += t * p.dividendCagr;
-      wWeight += t;
+  $('incStats').innerHTML = [
+    stat({ label: 'Brutto p.a.', value: fmtCurrency(inc.grossAnnual, 0) }),
+    stat({ label: 'Netto p.a.', value: fmtCurrency(inc.netAnnual, 0) }),
+    stat({ label: 'Netto pro Monat', value: fmtCurrency(inc.netAnnual / 12, 0), sub: 'Durchschnitt' }),
+    stat({
+      label: 'Steuern p.a.',
+      value: fmtCurrency(inc.taxAnnual, 0),
+      sub: `effektiv ${fmtPercent(inc.grossAnnual > 0 ? inc.taxAnnual / inc.grossAnnual : 0, 1)}`,
+    }),
+    stat({ label: 'Netto-Rendite', value: fmtPercent(k.totalValue > 0 ? inc.netAnnual / k.totalValue : NaN) }),
+    stat({ label: 'Netto Yield on Cost', value: fmtPercent(k.invested > 0 ? inc.netAnnual / k.invested : NaN) }),
+    stat({ label: 'Dividenden-CAGR', value: fmtPercent(d.cagr, 1), sub: 'einkommensgewichtet' }),
+    stat({
+      label: 'Nächste 30 Tage',
+      value: fmtCurrency(next30.reduce((s, u) => s + u.amount, 0), 0),
+      sub: `${next30.length} Zahlungen, brutto`,
+    }),
+  ].join('');
+
+  const month = new Date().getMonth();
+  $('legendMonths').innerHTML = legend([['netto', 'green'], ['Steuer', 'faint']]);
+  $('incMonths').innerHTML = bars(
+    inc.gross.map((g, i) => ({
+      label: MONTHS_DE[i],
+      value: g,
+      net: inc.net[i],
+      current: i === month,
+      segments: [
+        { value: inc.net[i], tone: 'green' },
+        { value: g - inc.net[i], tone: 'faint' },
+      ],
+    })),
+    {
+      cls: 'bars-short',
+      format: (g, i) => `${fmtCurrency(i.net, 0)}<span class="faint hide-sm"> / ${fmtCurrency(g, 0)}</span>`,
     }
-  });
-  const g = wWeight > 0 ? wSum / wWeight : 0;
+  );
 
-  const effTaxRate = dist.grossAnnual > 0 ? dist.taxAnnual / dist.grossAnnual : 0;
-  const netYield = k.totalValue > 0 ? dist.netAnnual / k.totalValue : NaN;
-  const netYoc = k.totalInvested > 0 ? dist.netAnnual / k.totalInvested : NaN;
+  const year = new Date().getFullYear();
+  $('incCagrNote').textContent = `${fmtPercent(d.cagr, 1)} Wachstum p.a.`;
+  $('incProjection').innerHTML = bars(
+    Array.from({ length: 6 }, (_, y) => ({
+      label: String(year + y),
+      value: inc.netAnnual * Math.pow(1 + d.cagr, y),
+      current: y === 0,
+    })),
+    { cls: 'bars-short', tone: 'green', format: (v) => fmtCurrency(v, 0) }
+  );
 
-  const cards = [
-    { label: 'Jährliche Bruttodividende', value: fmtCurrency(dist.grossAnnual) },
-    { label: 'Jährliche Nettodividende', value: fmtCurrency(dist.netAnnual) },
-    { label: 'Ø Netto / Monat', value: fmtCurrency(dist.netAnnual / 12) },
-    { label: 'Steuerlast p.a.', value: fmtCurrency(dist.taxAnnual), sub: `effektiv ${fmtPercent(effTaxRate, 1)}` },
-    { label: 'Netto-Dividendenrendite', value: fmtPercent(netYield) },
-    { label: 'Netto Yield on Cost', value: fmtPercent(netYoc) },
-    { label: 'Gewichteter Dividenden-CAGR', value: fmtPercent(g, 1) },
-    { label: 'Netto in 5 Jahren (p.a.)', value: fmtCurrency(dist.netAnnual * Math.pow(1 + g, 5)) },
-  ];
-  document.getElementById('incomeKpis').innerHTML = cards
-    .map(
-      (c) => `<div class="kpi-card kpi-income"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
-    )
-    .join('');
-
-  // Monthly net vs gross bars (net = green segment, remainder = tax).
-  const maxMonth = Math.max(...dist.gross, 0.0001);
-  document.getElementById('incomeMonths').innerHTML = dist.gross
-    .map((gv, i) => {
-      const nv = dist.net[i];
-      const wGross = (gv / maxMonth) * 100;
-      const wNet = gv > 0 ? (nv / gv) * 100 : 0;
-      return `
-      <div class="cal-row">
-        <span class="cal-mlabel">${MONTHS_DE[i]}</span>
-        <span class="cal-barwrap"><span class="inc-track" style="width:${wGross.toFixed(1)}%"><span class="inc-net" style="width:${wNet.toFixed(1)}%"></span></span></span>
-        <span class="cal-val">${fmtCurrency(nv)} <span class="inc-gross">/ ${fmtCurrency(gv)}</span></span>
-      </div>`;
-    })
-    .join('');
-
-  // Projection (current year + 5).
-  document.getElementById('incomeCagr').textContent = `(${fmtPercent(g, 1)} p.a.)`;
-  const baseYear = new Date().getFullYear();
-  const years = [];
-  for (let y = 0; y <= 5; y++) years.push({ year: baseYear + y, value: dist.netAnnual * Math.pow(1 + g, y) });
-  const maxYear = Math.max(...years.map((y) => y.value), 0.0001);
-  document.getElementById('incomeProjection').innerHTML = years
-    .map(
-      (y, i) => `
-      <div class="cal-row ${i === 0 ? 'cal-current' : ''}">
-        <span class="cal-mlabel">${y.year}</span>
-        <span class="cal-barwrap"><span class="cal-fill" style="width:${((y.value / maxYear) * 100).toFixed(1)}%"></span></span>
-        <span class="cal-val">${fmtCurrency(y.value)}</span>
-      </div>`
-    )
-    .join('');
-}
-
-/* ----------------------------------------------------------------------------
- * Zieldepot 2033 — net dividend goal projection & per-position gap
- * ----------------------------------------------------------------------------
- * Projects each position's NET dividend to 2033 using its own dividend CAGR
- * (organic only, no new money), compares the total to the monthly net goal, and
- * shows what to do: a one-off lump sum and a monthly savings rate to close the
- * gap. The gap is split per position weighted by the quality score. Everything
- * is derived from the CSV (totalDividendRate, taxRate, dividendCagr, value).
- * Simplified assumptions; no advice.
- * --------------------------------------------------------------------------*/
-function clampG(g) {
-  // Use only non-negative, capped dividend growth for projections.
-  return hasNum(g) ? Math.max(0, Math.min(g, 0.15)) : 0;
-}
-
-function computeTarget() {
-  const active = STATE.active;
-  const years = Math.max(1, TARGET_YEAR - new Date().getFullYear());
-  const totalValue = STATE.ctx.totalValue;
-
-  // Per-position net dividend today and projected to 2033.
-  let currentNet = 0;
-  let projectedNet = 0;
-  const rows = active.map((p) => {
-    const taxRate = hasNum(p.taxRate) ? p.taxRate : 0;
-    const netNow = num0(p.totalDividendRate) * (1 - taxRate);
-    const g = clampG(p.dividendCagr);
-    const netProj = netNow * Math.pow(1 + g, years);
-    currentNet += netNow;
-    projectedNet += netProj;
-    // Net yield on the position (fallback handled later).
-    const yNet = hasNum(p.dividendYield) && p.dividendYield > 0 ? p.dividendYield * (1 - taxRate) : null;
-    return { p, netNow, netProj, g, yNet };
-  });
-
-  // Income-weighted average dividend CAGR (for new-money growth).
-  let wSum = 0;
-  let wWeight = 0;
-  active.forEach((p) => {
-    const t = num0(p.totalDividendRate);
-    if (t > 0 && hasNum(p.dividendCagr)) {
-      wSum += t * p.dividendCagr;
-      wWeight += t;
-    }
-  });
-  const gAvg = Math.max(0, Math.min(wWeight > 0 ? wSum / wWeight : 0, 0.12));
-
-  // Portfolio net yield (net dividend / value).
-  const yPort = totalValue > 0 ? currentNet / totalValue : 0;
-
-  const targetAnnual = STATE.targetMonthly * 12;
-  const gap = Math.max(0, targetAnnual - projectedNet);
-  const growth = Math.pow(1 + gAvg, years);
-
-  // Split the missing net dividend across the dividend payers still being
-  // invested into (not deactivated), weighted by quality score. Capital per
-  // position uses its own net yield & growth; the headline lump sum is the sum
-  // of these (rows add up). Deactivated titles keep growing organically but
-  // receive no new capital.
-  let lump = 0;
-  rows.forEach((r) => {
-    r.excluded = STATE.targetExcluded.has(r.p.symbol);
-    r.share = 0;
-    r.addCapital = 0;
-  });
-  const payers = rows.filter((r) => r.netNow > 0 && !r.excluded);
-  const scoreSum = payers.reduce((s, r) => s + r.p.scores.total, 0);
-  if (gap > 0 && scoreSum > 0) {
-    payers.forEach((r) => {
-      r.share = gap * (r.p.scores.total / scoreSum); // missing net dividend p.a.
-      const yUse = r.yNet && r.yNet > 0 ? r.yNet : yPort;
-      r.addCapital = yUse > 0 ? r.share / (yUse * Math.pow(1 + r.g, years)) : 0;
-      lump += r.addCapital;
-    });
+  // Upcoming payments grouped by month.
+  const groups = new Map();
+  for (const u of d.upcoming) {
+    const key = u.date.getFullYear() * 12 + u.date.getMonth();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(u);
   }
-
-  const i = gAvg / 12;
-  const n = years * 12;
-  const annuityFactor = i > 1e-9 ? (Math.pow(1 + i, n) - 1) / i : n; // FV of 1/month
-  // Monthly savings whose future value (grown at gAvg) equals the lump grown at gAvg.
-  const monthly = lump > 0 && annuityFactor > 0 ? (lump * growth) / annuityFactor : 0;
-
-  // Savings-rate scenario: net dividend reached by 2033 if STATE.targetSavings
-  // €/month is invested at the portfolio net yield (capital grows at gAvg).
-  const scenarioReachedAnnual = projectedNet + yPort * STATE.targetSavings * annuityFactor;
-
-  return {
-    years, rows, payers, currentNet, projectedNet, gAvg, yPort, targetAnnual, gap, lump, monthly,
-    noPayers: gap > 0 && scoreSum <= 0,
-    scenarioReachedAnnual,
-  };
-}
-
-function renderTarget() {
-  if (!STATE.active.length) return;
-  const t = computeTarget();
-  const reached = t.gap <= 0;
-  const projMonthly = t.projectedNet / 12;
-  const diffMonthly = Math.max(0, STATE.targetMonthly - projMonthly);
-
-  // Highlight the active preset button.
-  document.querySelectorAll('.target-btn').forEach((b) => {
-    b.classList.toggle('active', parseInt(b.dataset.target, 10) === STATE.targetMonthly);
-  });
-
-  // Summary line (with realistic-goal hint / all-deactivated warning).
-  const summary = document.getElementById('targetSummary');
-  if (reached) {
-    summary.innerHTML = `✅ Dein projiziertes Netto-Einkommen 2033 (${fmtCurrency(projMonthly)}/Monat) erreicht das Ziel von ${fmtCurrency(STATE.targetMonthly)}/Monat bereits.`;
-  } else if (t.noPayers) {
-    summary.innerHTML =
-      `Zum Ziel fehlen <strong>${fmtCurrency(diffMonthly)}/Monat</strong> (${fmtCurrency(t.gap)} netto p.a.). ` +
-      '<strong>Alle Werte sind zum Besparen deaktiviert</strong> – aktiviere unten mindestens einen Wert, um den Kapitalbedarf zu sehen.';
-  } else {
-    let hint = '';
-    if (STATE.targetMonthly >= 3500 && t.lump > STATE.kpis.totalValue * 1.5) {
-      hint = ' Das 3.500-€-Ziel ist ambitioniert – über den Button „2.000 €" siehst du eine realistischere Variante.';
-    }
-    summary.innerHTML =
-      `Bis ${t.years} Jahre bis 2033. Zum Ziel fehlen aktuell <strong>${fmtCurrency(diffMonthly)}/Monat</strong> ` +
-      `(${fmtCurrency(t.gap)} netto p.a.).${hint}`;
-  }
-
-  // Savings-rate scenario result (inverse: given €/month, what do you reach?).
-  const savEl = document.getElementById('targetSavingsResult');
-  if (savEl) {
-    if (STATE.targetSavings > 0) {
-      const reachedM = t.scenarioReachedAnnual / 12;
-      const pct = STATE.targetMonthly > 0 ? reachedM / STATE.targetMonthly : 0;
-      const hitsGoal = reachedM >= STATE.targetMonthly;
-      savEl.innerHTML = `→ Mit <strong>${fmtCurrency(STATE.targetSavings)}/Mon</strong> erreichst du bis 2033 ca. <strong>${fmtCurrency(reachedM)}/Mon</strong> netto (${fmtPercent(pct, 0)} des Ziels)${hitsGoal ? ' ✅' : ''}.`;
-    } else {
-      savEl.textContent = '';
-    }
-  }
-
-  const cards = [
-    { label: 'Netto-Dividende heute', value: `${fmtCurrency(STATE.kpis ? t.currentNet / 12 : 0)} /Mon`, sub: `${fmtCurrency(t.currentNet)} p.a.` },
-    { label: 'Projektion 2033 (netto)', value: `${fmtCurrency(projMonthly)} /Mon`, sub: `${fmtCurrency(t.projectedNet)} p.a. · organisch`, accent: 'income' },
-    { label: 'Monatsziel (netto)', value: `${fmtCurrency(STATE.targetMonthly)} /Mon`, sub: `${fmtCurrency(t.targetAnnual)} p.a.` },
-    { label: 'Differenz zum Ziel', value: reached ? 'Ziel erreicht' : `${fmtCurrency(diffMonthly)} /Mon`, accent: reached ? 'pos' : 'neg' },
-    { label: 'Benötigter Einmalbetrag', value: fmtCurrency(t.lump), sub: 'heute investiert (bis 2033)' },
-    { label: 'Benötigte Sparrate', value: `${fmtCurrency(t.monthly)} /Mon`, sub: `bis 2033 (${t.years} J.)` },
-    { label: 'Ø Dividenden-Wachstum', value: fmtPercent(t.gAvg, 1), sub: 'einkommensgewichtet p.a.' },
-    { label: 'Netto-Rendite (Basis)', value: fmtPercent(t.yPort, 2), sub: 'für Kapitalbedarf' },
-  ];
-  document.getElementById('targetKpis').innerHTML = cards
-    .map(
-      (c) => `<div class="kpi-card kpi-${c.accent || 'neutral'}"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div>${c.sub ? `<div class="kpi-sub">${c.sub}</div>` : ''}</div>`
-    )
-    .join('');
-
-  // Per-position table: all dividend payers, each with a "Besparen" toggle.
-  // Deactivated titles keep their projection but get no extra capital.
-  const tbody = document.getElementById('targetBody');
-  const countEl = document.getElementById('targetCount');
-  const tableRows = t.rows.filter((r) => r.netNow > 0).sort((a, b) => b.p.scores.total - a.p.scores.total);
-
-  countEl.textContent = reached
-    ? 'Ziel bereits erreicht – kein zusätzlicher Kapitalbedarf. Schalter zum Szenario-Spielen unten.'
-    : `Verteilung von ${fmtCurrency(t.gap)} fehlender Netto-Dividende p.a. auf ${t.payers.length} besparte Werte (nach Score). Summe Zusatz-Kapital = ${fmtCurrency(t.lump)}.`;
-
-  tbody.innerHTML = tableRows
-    .map((r) => {
-      const off = r.excluded;
-      const shareTxt = off || reached ? '—' : fmtCurrency(r.share);
-      const capTxt = off || reached ? '—' : fmtCurrency(r.addCapital);
-      return `
-      <tr class="${off ? 'target-row-off' : ''}">
-        <td class="t-sym">${escapeHtml(r.p.symbol)}</td>
-        <td class="t-name" title="${escapeHtml(r.p.name)}">${escapeHtml(r.p.name)}</td>
-        <td class="t-num">${fmtCurrency(r.netNow)}</td>
-        <td class="t-num">${fmtCurrency(r.netProj)}</td>
-        <td class="t-num">${shareTxt}</td>
-        <td class="t-num"><strong>${capTxt}</strong></td>
-        <td class="t-num">${r.p.scores.total}</td>
-        <td><input type="checkbox" class="target-toggle" data-symbol="${escapeHtml(r.p.symbol)}" ${off ? '' : 'checked'} title="Wert besparen / nicht besparen" /></td>
-      </tr>`;
-    })
-    .join('');
-
-  // Wire the per-title toggles (recompute live for scenario play).
-  tbody.querySelectorAll('.target-toggle').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const sym = cb.dataset.symbol;
-      if (cb.checked) STATE.targetExcluded.delete(sym);
-      else STATE.targetExcluded.add(sym);
-      renderTarget();
-    });
-  });
-}
-
-/* ----------------------------------------------------------------------------
- * Top-up plan (1.000 € tranches) — target-weight planner + rendering
- * ----------------------------------------------------------------------------
- * Smarter & more granular than a flat greedy:
- *   1) Every eligible position gets a quality-scaled TARGET weight (soft cap)
- *      from its ranking + CSV metrics + diversification (see insights.js).
- *   2) The budget is split across candidates proportionally to an
- *      "attractiveness" = quality × how far the position is below its target,
- *      via iterative water-filling, capped by the soft target and the 8% hard
- *      cap. Capped positions hand their leftover to the others.
- *   3) Those € targets are rendered as 1.000 € tranches by repeatedly funding
- *      whichever position sits furthest below its € target. Allocations + ranks
- *      are recomputed per tranche so the "Wieso?" stays accurate.
- * --------------------------------------------------------------------------*/
-function buildTopUpPlan(trancheCount) {
-  // Work on clones so the real portfolio state is never mutated.
-  const sim = STATE.active.map((p) => ({ ...p }));
-
-  // Recompute allocations, context and scores from the simulated values.
-  const recompute = () => {
-    const totalValue = sim.reduce((s, p) => s + num0(p.value), 0);
-    const totalAnnualDividend = sim.reduce((s, p) => s + num0(p.totalDividendRate), 0);
-    const sectorValue = {};
-    const countryValue = {};
-    sim.forEach((p) => {
-      sectorValue[p.sector] = (sectorValue[p.sector] || 0) + num0(p.value);
-      countryValue[p.country] = (countryValue[p.country] || 0) + num0(p.value);
-    });
-    const sectorAllocation = {};
-    const countryAllocation = {};
-    Object.keys(sectorValue).forEach((k) => (sectorAllocation[k] = totalValue > 0 ? sectorValue[k] / totalValue : 0));
-    Object.keys(countryValue).forEach((k) => (countryAllocation[k] = totalValue > 0 ? countryValue[k] / totalValue : 0));
-    sim.forEach((p) => (p.allocation = totalValue > 0 ? num0(p.value) / totalValue : 0));
-    const ctx = { totalValue, totalAnnualDividend, sectorAllocation, countryAllocation };
-    sim.forEach((p) => (p.scores = computeScores(p, ctx)));
-    return ctx;
-  };
-
-  let ctx = recompute();
-  const budget = trancheCount * TRANCHE_SIZE;
-
-  // --- 1) Build candidate profiles (quality, soft cap, room) from base state.
-  const candidates = [];
-  sim.forEach((p) => {
-    const m = topUpMetrics(p, ctx);
-    if (!topUpEligible(p, ctx, m)) return;
-    const quality = topUpQuality(p, m);
-    const softCap = topUpSoftCap(quality);
-    // Underweight degree relative to the soft target (0 if already at/above it).
-    const under = Math.max(0, softCap - p.allocation);
-    if (under <= 0) return; // already at its quality target -> nothing to add
-    const attractiveness = quality * Math.min(1, under / softCap);
-    // € room: to the soft target and to the hard cap (whichever is smaller).
-    const roomSoft = Math.max(0, (softCap - p.allocation) * ctx.totalValue);
-    const roomHard = Math.max(0, TOPUP_HARD_CAP * ctx.totalValue - num0(p.value));
-    candidates.push({ p, attractiveness, capEuro: Math.min(roomSoft, roomHard), targetEuro: 0 });
-  });
-  if (!candidates.length) return [];
-
-  // --- 2) Water-filling: split the budget proportionally to attractiveness,
-  //        respecting each candidate's € cap; capped ones spill over.
-  let remaining = budget;
-  for (let iter = 0; iter < 8 && remaining >= 1; iter++) {
-    const open = candidates.filter((c) => c.targetEuro < c.capEuro - 1e-6 && c.attractiveness > 0);
-    const sumAttr = open.reduce((s, c) => s + c.attractiveness, 0);
-    if (sumAttr <= 0) break;
-    let placed = 0;
-    open.forEach((c) => {
-      const want = remaining * (c.attractiveness / sumAttr);
-      const add = Math.min(want, c.capEuro - c.targetEuro);
-      if (add > 0) {
-        c.targetEuro += add;
-        placed += add;
-      }
-    });
-    remaining -= placed;
-    if (placed < 1e-6) break;
-  }
-
-  // --- 3) Render € targets as 1.000 € tranches: each tranche funds the
-  //        position furthest below its € target (granular, proportional spread).
-  const assigned = {};
-  candidates.forEach((c) => (assigned[c.p.symbol] = 0));
-  const bySymbol = {};
-  candidates.forEach((c) => (bySymbol[c.p.symbol] = c));
-  const plan = [];
-
-  for (let i = 0; i < trancheCount; i++) {
-    // Live ranking for the reasoning.
-    const ranked = [...sim].sort((a, b) => b.scores.total - a.scores.total);
-    const rankOf = {};
-    ranked.forEach((p, idx) => (rankOf[p.symbol] = idx + 1));
-
-    let best = null;
-    let bestGap = 0;
-    candidates.forEach((c) => {
-      if (assigned[c.p.symbol] + TRANCHE_SIZE > c.capEuro + TRANCHE_SIZE * 0.5) return; // respect cap
-      const gap = c.targetEuro - assigned[c.p.symbol];
-      if (gap > bestGap) {
-        bestGap = gap;
-        best = c;
-      }
-    });
-    if (!best || bestGap <= 1e-6) break; // all € targets met (budget exceeds sensible capacity)
-
-    assigned[best.p.symbol] += TRANCHE_SIZE;
-    const m = topUpMetrics(best.p, ctx);
-    const oldAlloc = best.p.allocation;
-    const decisionScore = best.p.scores.total;
-    const reasons = topUpReasons(best.p, m, { rank: rankOf[best.p.symbol] });
-
-    best.p.value = num0(best.p.value) + TRANCHE_SIZE;
-    ctx = recompute();
-
-    plan.push({
-      n: i + 1,
-      symbol: best.p.symbol,
-      name: best.p.name,
-      sector: best.p.sector,
-      country: best.p.country,
-      securityType: best.p.securityType,
-      score: decisionScore,
-      reasons,
-      oldAlloc,
-      newAlloc: best.p.allocation,
-      targetWeight: topUpSoftCap(topUpQuality(best.p, m)),
-    });
-  }
-  return plan;
-}
-
-function renderTopUp() {
-  if (!STATE.active.length) return;
-  const input = document.getElementById('topupBudget');
-  let budget = parseInt(input.value, 10);
-  if (!Number.isFinite(budget) || budget < TRANCHE_SIZE) budget = TRANCHE_SIZE;
-  const trancheCount = Math.floor(budget / TRANCHE_SIZE);
-
-  const plan = buildTopUpPlan(trancheCount);
-
-  const summary = document.getElementById('topupSummary');
-  const planEl = document.getElementById('topupPlan');
-  const aggEl = document.getElementById('topupAgg');
-
-  if (!plan.length) {
-    summary.innerHTML = '';
-    planEl.innerHTML =
-      '<div class="info-box">Auf Basis der aktuellen Analyse gibt es derzeit keine eindeutigen Aufstockungskandidaten ' +
-      '(z. B. wegen hoher Konzentration oder schwacher Signale). Für eine genauere Entscheidung wären zusätzliche Fundamentaldaten nötig.</div>';
-    aggEl.innerHTML = '';
-    return;
-  }
-
-  const invested = plan.length * TRANCHE_SIZE;
-  summary.innerHTML = `
-    <span><strong>${plan.length}</strong> Tranchen</span>
-    <span><strong>${fmtCurrency(invested)}</strong> verplant</span>`;
-
-  // Per-tranche cards with the reasoning ("Wieso?").
-  planEl.innerHTML = plan
-    .map((t) => {
-      const interp = interpretScore(t.score);
-      const reasons = t.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('');
-      return `
-      <div class="topup-card">
-        <div class="topup-head">
-          <span class="topup-n">Tranche ${t.n}</span>
-          <span class="topup-amount">${fmtCurrency(TRANCHE_SIZE)}</span>
-        </div>
-        <div class="topup-target">
-          <span class="topup-sym">${escapeHtml(t.symbol)}</span>
-          <span class="score-pill ${interp.cls}">${t.score}</span>
-        </div>
-        <div class="topup-name">${escapeHtml(t.name)}</div>
-        <div class="topup-meta">${escapeHtml(t.sector)} · ${fmtCountry(t.country)} · ${fmtSecurityType(t.securityType)}</div>
-        <div class="topup-alloc">Anteil: ${fmtPercent(t.oldAlloc, 1)} → <strong>${fmtPercent(t.newAlloc, 1)}</strong> <span class="topup-target-w">(Ziel ~${fmtPercent(t.targetWeight, 1)})</span></div>
-        <div class="topup-why">
-          <div class="topup-why-title">Wieso?</div>
-          <ul>${reasons}</ul>
-        </div>
-      </div>`;
-    })
-    .join('');
-
-  // Aggregate the budget per position (how much total goes where).
-  const agg = {};
-  plan.forEach((t) => {
-    if (!agg[t.symbol]) agg[t.symbol] = { symbol: t.symbol, name: t.name, count: 0 };
-    agg[t.symbol].count += 1;
-  });
-  const aggList = Object.values(agg).sort((a, b) => b.count - a.count);
-  aggEl.innerHTML = `
-    <h3 class="topup-agg-title">Zusammenfassung pro Wert</h3>
-    <div class="topup-agg-grid">
-      ${aggList
-        .map(
-          (a) => `
-        <div class="topup-agg-item">
-          <span class="topup-agg-sym">${escapeHtml(a.symbol)}</span>
-          <span class="topup-agg-name">${escapeHtml(a.name)}</span>
-          <span class="topup-agg-amount">${fmtCurrency(a.count * TRANCHE_SIZE)} <span class="topup-agg-count">(${a.count}×)</span></span>
+  $('incUpcoming').innerHTML =
+    [...groups.values()]
+      .map(
+        (list) => `<div class="pay-month">
+        <div class="pay-head"><span>${MONTHS_LONG[list[0].date.getMonth()]} ${list[0].date.getFullYear()}</span><span>${fmtCurrency(list.reduce((s, u) => s + u.amount, 0), 0)}</span></div>
+        ${list
+          .map(
+            (u) => `<div class="pay-row">
+          <span class="pay-date">${fmtDate(u.p.payDate, true)}</span>
+          <span class="pay-main"><span class="pay-title">${posLabel(u.p)}</span><span class="pay-sub">Ex-Tag ${fmtDate(u.p.exDate, true)} · ${fmtFrequency(u.p.dividendFrequency)}</span></span>
+          <span class="num">${fmtCurrency(u.amount)}</span>
         </div>`
-        )
-        .join('')}
-    </div>`;
+          )
+          .join('')}
+      </div>`
+      )
+      .join('') || '<p class="empty-note">Keine zukünftigen Zahltermine in der CSV.</p>';
 }
 
 /* ----------------------------------------------------------------------------
- * Inactive / sold / watchlist section
+ * Ziel 2033
  * --------------------------------------------------------------------------*/
-function renderInactive() {
-  const navBtn = document.getElementById('navInactive');
-  const tbody = document.getElementById('inactiveBody');
-  // No inactive positions -> hide the nav entry for this page entirely.
-  if (!STATE.inactive.length) {
-    navBtn.classList.add('hidden');
+function renderTarget() {
+  const d = STATE.data;
+  const s = STATE.settings;
+  syncValueControl('target', s.target);
+  if (document.activeElement !== $('savingsInput')) $('savingsInput').value = s.savings || '';
+
+  const t = computeTarget(d, s);
+  const projM = t.projectedNet / 12;
+  const gapM = t.gap / 12;
+  const withSavingsM = (t.projectedNet + t.savingsAnnual) / 12;
+
+  let summary;
+  if (t.reached) {
+    summary = 'Ziel organisch erreicht – ohne weitere Käufe.';
+  } else if (t.noneFunded) {
+    summary = 'Alle Werte sind vom Besparen ausgeschlossen – aktiviere unten mindestens einen, um den Kapitalbedarf zu sehen.';
+  } else {
+    summary = `Noch ${t.years} Jahre bis ${TARGET_YEAR}; es fehlen ${fmtCurrency(gapM, 0)} pro Monat.`;
+    if (s.target >= 3500 && t.lump > d.kpis.totalValue * 1.5) {
+      summary += ' Das Ziel ist ambitioniert – mit 2.000 € siehst du eine realistischere Variante.';
+    }
+  }
+  const scenario =
+    s.savings > 0
+      ? `<p>Mit <strong>${fmtCurrency(s.savings, 0)}</strong> Sparrate pro Monat erreichst du ca. <strong>${fmtCurrency(withSavingsM, 0)}</strong> netto pro Monat (${fmtPercent(withSavingsM / s.target, 0)} des Ziels)${withSavingsM >= s.target ? ' – Ziel erreicht' : ''}.</p>`
+      : '';
+
+  $('targetProgress').innerHTML = `
+    <div class="card-head">
+      <h2 class="card-title">${fmtCurrency(projM, 0)} <span class="muted">von ${fmtCurrency(s.target, 0)} netto pro Monat</span></h2>
+      ${s.savings > 0 ? legend([['organisch', 'green'], ['mit Sparrate', 'blue']]) : `<span class="card-note">${fmtPercent(projM / s.target, 0)} erreicht</span>`}
+    </div>
+    ${meter(
+      [
+        { value: t.projectedNet, tone: 'green' },
+        { value: t.savingsAnnual, tone: 'blue' },
+      ],
+      t.targetAnnual,
+      'Fortschritt zum Monatsziel'
+    )}
+    <p class="muted">${summary}</p>${scenario}`;
+
+  $('targetStats').innerHTML = [
+    stat({ label: 'Netto heute / Monat', value: fmtCurrency(t.currentNet / 12, 0), sub: `${fmtCurrency(t.currentNet, 0)} p.a.` }),
+    stat({ label: `Projektion ${TARGET_YEAR} / Monat`, value: fmtCurrency(projM, 0), sub: 'organisch, ohne Käufe' }),
+    stat({ label: 'Lücke / Monat', value: t.reached ? 'erreicht' : fmtCurrency(gapM, 0), tone: t.reached ? 'green' : 'red' }),
+    stat({ label: 'Einmalbetrag', value: fmtCurrency(t.lump, 0), sub: `bei ${fmtPercent(t.yPort)} Netto-Rendite` }),
+    stat({ label: 'Sparrate nötig / Monat', value: fmtCurrency(t.monthly, 0), sub: `${t.years} Jahre lang` }),
+    stat({ label: 'Ø Dividendenwachstum', value: fmtPercent(t.gAvg, 1), sub: 'einkommensgewichtet' }),
+  ].join('');
+
+  $('targetNote').textContent = t.reached
+    ? 'Ziel erreicht – kein zusätzlicher Kapitalbedarf. Die Schalter bleiben für Szenarien aktiv.'
+    : `${fmtCurrency(t.gap, 0)} fehlende Netto-Dividende p.a., nach Score verteilt auf ${t.fundedCount} besparte Werte. Schalter aus = Wert wächst nur organisch weiter.`;
+  $('targetBody').innerHTML = t.rows.map((r) => targetRowHtml(r, t.reached)).join('');
+}
+
+function targetRowHtml(r, reached) {
+  const p = r.p;
+  const sym = escapeHtml(p.symbol);
+  const dash = r.excluded || reached;
+  return `<tr class="${r.excluded ? 'row-off' : ''}" data-open="${sym}">
+    <td class="c-lead"><label class="switch" title="Beim Besparen berücksichtigen">
+      <input type="checkbox" data-exclude="${sym}"${r.excluded ? '' : ' checked'} /><span class="switch-ui"></span><span class="sr-only">${sym} besparen</span>
+    </label></td>
+    <td class="c-main">${symLink(p)}<span class="sub">${escapeHtml(p.name)}</span></td>
+    <td class="c-key num">${dash ? NA : fmtCurrency(r.addCapital, 0)}</td>
+    <td class="c-br"></td>
+    <td class="num" data-label="heute">${fmtCurrency(r.netNow, 0)}</td>
+    <td class="num" data-label="${TARGET_YEAR}">${fmtCurrency(r.netProj, 0)}</td>
+    <td class="num" data-label="Zusatz-Div.">${dash ? NA : fmtCurrency(r.share, 0)}</td>
+    <td class="num c-score">${scorePill(p.scores.total)}</td>
+  </tr>`;
+}
+
+/* ----------------------------------------------------------------------------
+ * Aufstocken
+ * --------------------------------------------------------------------------*/
+function renderTopUp() {
+  const s = STATE.settings;
+  syncValueControl('budget', s.budget);
+  $('topupMethod').innerHTML = `
+    <p><strong>Kandidaten</strong> = Kategorie „Aufstocken“: Score ≥ ${LIMITS.minAddScore}, Dividendenzahler, keine Beobachten-Signale und Luft bis zum Zielgewicht.</p>
+    <p><strong>Zielgewicht</strong> je Wert ${fmtPercent(TOPUP_SOFT_MIN, 0)}–${fmtPercent(TOPUP_SOFT_MAX, 0)} nach Qualität (Score, Diversifikation, Wachstum, Rendite); harte Grenze ${fmtPercent(TOPUP_HARD_CAP, 0)}.</p>
+    <p><strong>Verteilung</strong> proportional zu Qualität × Untergewichtung, ausgegeben in Tranchen à ${fmtCurrency(TRANCHE_SIZE, 0)}. Nach jeder Tranche werden Anteile und Ranking neu berechnet.</p>`;
+
+  const count = Math.max(1, Math.floor(s.budget / TRANCHE_SIZE));
+  if (!STATE.topUp || STATE.topUp.count !== count) {
+    STATE.topUp = { count, plan: buildTopUpPlan(STATE.data.active, count) };
+  }
+  const { tranches, perPosition, candidateCount } = STATE.topUp.plan;
+
+  if (!tranches.length) {
+    $('topupSummary').innerHTML =
+      '<p class="empty-note">Derzeit keine Aufstockungskandidaten – alle Werte sind am Zielgewicht oder haben Beobachten-Signale.</p>';
+    $('topupTranches').innerHTML = '';
     return;
   }
-  navBtn.classList.remove('hidden');
-  document.getElementById('inactiveCount').textContent = STATE.inactive.length;
+  const planned = tranches.length * TRANCHE_SIZE;
+  const rest = count * TRANCHE_SIZE - planned;
+  $('topupSummary').innerHTML = `
+    <div class="card-head">
+      <h2 class="card-title">Verteilung</h2>
+      <span class="card-note">${tranches.length} Tranchen · ${fmtCurrency(planned, 0)} · ${candidateCount} Kandidaten</span>
+    </div>
+    ${bars(
+      perPosition.map((x) => ({ label: posLabel(x.p), value: x.amount, count: x.count })),
+      { max: planned, tone: 'green', format: (v, i) => `${fmtCurrency(v, 0)} <span class="faint">${i.count}×</span>` }
+    )}
+    ${rest > 0 ? `<p class="card-note">${fmtCurrency(rest, 0)} nicht verplant – alle Kandidaten erreichen ihr Zielgewicht.</p>` : ''}`;
+  $('topupTranches').innerHTML = tranches.map((t) => trancheHtml(t, tranches.length <= 3)).join('');
+}
 
-  tbody.innerHTML = STATE.inactive
-    .map(
-      (p) => `
-      <tr>
-        <td class="t-sym">${escapeHtml(p.symbol)}</td>
-        <td class="t-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
-        <td>${escapeHtml(p.isin)}</td>
-        <td>${escapeHtml(p.sector)}</td>
-        <td>${fmtCountry(p.country)}</td>
-        <td>${fmtSecurityType(p.securityType)}</td>
-        <td class="t-num">${fmtPercent(p.dividendYield)}</td>
-        <td>${fmtFrequency(p.dividendFrequency)}</td>
-      </tr>`
-    )
-    .join('');
+function trancheHtml(t, open) {
+  const p = t.p;
+  return `<details class="card tranche"${open ? ' open' : ''}>
+    <summary>
+      <span class="tranche-n">${t.n}</span>
+      <span class="tranche-id">${posLabel(p)}</span>
+      ${scorePill(t.score)}
+      <span class="tranche-amount">${fmtCurrency(TRANCHE_SIZE, 0)}</span>
+    </summary>
+    <div class="tranche-body">
+      <div class="alloc-line">
+        <span>Anteil ${fmtPercent(t.oldAlloc, 1)} → <strong>${fmtPercent(t.newAlloc, 1)}</strong></span>
+        <span class="faint">Ziel ~${fmtPercent(t.target, 1)}</span>
+      </div>
+      ${meter(
+        [
+          { value: t.oldAlloc, tone: 'blue' },
+          { value: t.newAlloc - t.oldAlloc, tone: 'green' },
+        ],
+        Math.max(t.target, t.newAlloc),
+        'Anteil vor und nach der Tranche im Verhältnis zum Zielgewicht'
+      )}
+      <p class="faint">${escapeHtml(fmtSector(p.sector))} · ${escapeHtml(fmtCountry(p.country))} · ${fmtSecurityType(p.securityType)}</p>
+      <h3 class="inset-title">Wieso?</h3>
+      <ul class="bullets">${t.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
+    </div>
+  </details>`;
 }
 
 /* ----------------------------------------------------------------------------
- * Utilities
+ * Positionen (incl. categories and inactive positions)
  * --------------------------------------------------------------------------*/
-function showError(msg) {
-  const el = document.getElementById('errorBox');
-  el.textContent = msg;
-  el.classList.remove('hidden');
+const SORTERS = {
+  value: (a, b) => num0(b.value) - num0(a.value),
+  score: (a, b) => b.scores.total - a.scores.total,
+  dividend: (a, b) => num0(b.totalDividendRate) - num0(a.totalDividendRate),
+  yield: (a, b) => num0(b.dividendYield) - num0(a.dividendYield),
+  cagr: (a, b) => num0(b.dividendCagr) - num0(a.dividendCagr),
+  gain: (a, b) => num0(b.gainRel) - num0(a.gainRel),
+};
+
+function fillPositionFilters() {
+  const ps = STATE.data.positions;
+  const options = (values, allLabel, fmt) =>
+    `<option value="">${allLabel}</option>` +
+    [...new Set(values)]
+      .sort()
+      .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(fmt(v))}</option>`)
+      .join('');
+  $('posSector').innerHTML = options(ps.map((p) => p.sector), 'Alle Sektoren', fmtSector);
+  $('posCountry').innerHTML = options(ps.map((p) => p.country), 'Alle Länder', fmtCountry);
+  $('posSearch').value = '';
 }
 
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function renderPositions() {
+  const d = STATE.data;
+  const counts = countBy(d.positions, 'action');
+  const items = [{ value: 'active', label: 'Alle aktiven', count: d.active.length }];
+  for (const [key, c] of Object.entries(ACTION_CATEGORIES)) {
+    if (counts[key]) items.push({ value: key, label: c.label, tone: c.tone, count: counts[key] });
+  }
+  if (!items.some((i) => i.value === STATE.ui.action)) STATE.ui.action = 'active';
+  $('posChips').innerHTML = chips(items, STATE.ui.action);
+  renderPositionRows();
 }
+
+function renderPositionRows() {
+  const d = STATE.data;
+  const f = STATE.ui.action;
+  const q = $('posSearch').value.trim().toLowerCase();
+  const sector = $('posSector').value;
+  const country = $('posCountry').value;
+  const base = f === 'active' ? d.active : d.positions.filter((p) => p.action === f);
+  const rows = base
+    .filter(
+      (p) =>
+        (!sector || p.sector === sector) &&
+        (!country || p.country === country) &&
+        (!q || `${p.symbol} ${p.name} ${p.isin}`.toLowerCase().includes(q))
+    )
+    .sort(SORTERS[$('posSort').value] || SORTERS.value);
+
+  $('posNote').textContent =
+    `${rows.length} von ${base.length} Werten` + (f === 'active' ? '' : ` · ${ACTION_CATEGORIES[f].desc}`);
+  $('posBody').innerHTML = rows.length
+    ? rows.map(positionRowHtml).join('')
+    : '<tr><td colspan="10" class="empty-note">Keine Treffer.</td></tr>';
+}
+
+function positionRowHtml(p) {
+  const active = p.isActive;
+  const ifActive = (fn) => (active ? fn() : NA);
+  const gainTone = num0(p.gainRel) >= 0 ? 'green' : 'red';
+  return `<tr class="edge tone-${ACTION_CATEGORIES[p.action].tone}" data-open="${escapeHtml(p.symbol)}">
+    <td class="c-main">${symLink(p)}<span class="sub">${escapeHtml(p.name)}</span></td>
+    <td class="c-key num">${ifActive(() => fmtCurrency(p.value))}</td>
+    <td class="c-br"></td>
+    <td class="num" data-label="Anteil">${ifActive(() => fmtPercent(p.allocation, 1))}</td>
+    <td class="num hide-sm">${ifActive(() => `<span class="tone-text tone-${gainTone}">${fmtSignedPercent(p.gainRel, 1)}</span>`)}</td>
+    <td class="num" data-label="Rendite">${fmtPercent(p.dividendYield)}</td>
+    <td class="num hide-sm">${fmtPercent(p.dividendYieldOnBuyin)}</td>
+    <td class="num" data-label="Div.">${active && paysDividend(p) ? fmtCurrency(p.totalDividendRate) : NA}</td>
+    <td class="num hide-sm">${fmtPercent(p.dividendCagr, 1)}</td>
+    <td class="num c-score">${scorePill(p.scores.total)}</td>
+    <td class="hide-sm">${actionTag(p.action)}</td>
+  </tr>`;
+}
+
+/* ----------------------------------------------------------------------------
+ * Detail sheet
+ * --------------------------------------------------------------------------*/
+function openSheet(symbol, fromNav) {
+  const d = STATE.data;
+  const sheet = $('sheet');
+  const p = d.positions.find((x) => x.symbol === symbol);
+  if (!p) {
+    history.replaceState(null, '', '#' + STATE.ui.view);
+    if (sheet.open) sheet.close();
+    return;
+  }
+  if (!sheet.open) STATE.sheetFromNav = fromNav;
+  STATE.sheetSymbol = symbol;
+
+  const i = d.ranked.indexOf(p);
+  $('sheetPos').textContent = p.isActive ? `Rang ${p.rank} von ${d.ranked.length} nach Score` : 'Inaktiv';
+  sheet.querySelector('[data-action="sheet-prev"]').disabled = i <= 0;
+  sheet.querySelector('[data-action="sheet-next"]').disabled = i < 0 || i >= d.ranked.length - 1;
+  $('sheetBody').innerHTML = detailHtml(p);
+  $('sheetBody').scrollTop = 0;
+  if (!sheet.open) sheet.showModal();
+}
+
+/** Browse by score rank; replaces the history entry instead of stacking. */
+function stepSheet(dir) {
+  const ranked = STATE.data.ranked;
+  const next = ranked[ranked.findIndex((p) => p.symbol === STATE.sheetSymbol) + dir];
+  if (next && $('sheet').open) location.replace(detailHref(next.symbol));
+}
+
+function detailHtml(p) {
+  const s = p.scores;
+  const gainTone = num0(p.gain) >= 0 ? 'green' : 'red';
+  const signed = (text) => `<span class="tone-text tone-${gainTone}">${text}</span>`;
+  const facts = [
+    ['Marktwert', fmtCurrency(p.value)],
+    ['Depotanteil', fmtPercent(p.allocation)],
+    ['Investiert', fmtCurrency(p.buyinTotal)],
+    ['Plus/Minus', signed(fmtSignedCurrency(p.gain))],
+    ['Plus/Minus %', signed(fmtSignedPercent(p.gainRel))],
+    ['Dividendenrendite', fmtPercent(p.dividendYield)],
+    ['Yield on Cost', fmtPercent(p.dividendYieldOnBuyin)],
+    ['Dividende p.a.', fmtCurrency(p.totalDividendRate)],
+    ['Dividende je Anteil', fmtCurrency(p.dividendRate)],
+    ['Frequenz', fmtFrequency(p.dividendFrequency)],
+    ['Dividenden-CAGR', fmtPercent(p.dividendCagr, 1) + (p.dividendCagrPeriod ? ` (${escapeHtml(p.dividendCagrPeriod)})` : '')],
+    ['Ex-Tag', fmtDate(p.exDate)],
+    ['Zahltag', fmtDate(p.payDate)],
+  ];
+  const parts = [
+    ['Sicherheit', s.safety],
+    ['Einkommen', s.income],
+    ['Wachstum', s.growth],
+    ['Depot-Fit', s.fit],
+    ['Streuung', s.concentration],
+  ];
+  const meta = [p.isin, fmtSector(p.sector), fmtCountry(p.country), fmtSecurityType(p.securityType)].filter(Boolean);
+
+  return `
+    <header class="detail-head">
+      <div class="detail-id">
+        <h2 class="detail-sym" id="sheetTitle">${escapeHtml(p.symbol)}</h2>
+        <p class="detail-name">${escapeHtml(p.name)}</p>
+        <p class="detail-meta">${meta.map(escapeHtml).join(' · ')}</p>
+        ${actionTag(p.action)}
+      </div>
+      ${scoreRing(s.total)}
+    </header>
+    <section class="inset">
+      ${bars(
+        parts.map(([label, v]) => ({ label, value: v, tone: scoreLevel(v).tone })),
+        { max: 100, cls: 'bars-score', format: (v) => v }
+      )}
+    </section>
+    <dl class="kv">${facts.map(([k, v]) => `<div class="kv-row"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
+    <section class="inset">
+      <h3 class="inset-title">Insights</h3>
+      <ul class="bullets">${p.insights.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+    </section>`;
+}
+
+const RENDER = {
+  uebersicht: renderOverview,
+  empfehlungen: renderRecs,
+  risiko: renderRisk,
+  einkommen: renderIncome,
+  ziel: renderTarget,
+  aufstocken: renderTopUp,
+  positionen: renderPositions,
+};
+
+boot(); // scripts are deferred, so the DOM is ready
